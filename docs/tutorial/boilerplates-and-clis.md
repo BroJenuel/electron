@@ -58,6 +58,12 @@ CT Lin's [`electron-react-boilerplate`](https://github.com/chentsulin/electron-r
 a look. It's quite popular in the community and uses `electron-builder`
 internally.
 
+## electron-vue-boilerplate
+
+If your a vue developer you can also try using Mister J's  
+[`Electron-Vue-Boilerplate`](https://github.com/MisterJ936/Electron-Vue-Boilerplate) might be worth
+a look. With this you can easily serve and build both the website and the app.
+
 ## Other Tools and Boilerplates
 
 The ["Awesome Electron" list](https://github.com/sindresorhus/awesome-electron#boilerplates) contains more tools and boilerplates
