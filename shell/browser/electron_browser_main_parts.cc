@@ -85,7 +85,7 @@
 #include "ui/strings/grit/app_locale_settings.h"
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "shell/browser/ui/cocoa/views_delegate_mac.h"
 #else
 #include "shell/browser/ui/views/electron_views_delegate.h"
@@ -165,10 +165,12 @@ void OverrideLinuxAppDataPath() {
   base::PathService::Override(DIR_APP_DATA, path);
 }
 
-int BrowserX11ErrorHandler(Display* d, XErrorEvent* error) {
+int BrowserX11ErrorHandler(Display* d, XErrorEvent* e) {
   if (!g_in_x11_io_error_handler && base::ThreadTaskRunnerHandle::IsSet()) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(&x11::LogErrorEventDescription, *error));
+        FROM_HERE,
+        base::BindOnce(&x11::LogErrorEventDescription, e->serial, e->error_code,
+                       e->request_code, e->minor_code));
   }
   return 0;
 }
@@ -229,7 +231,7 @@ void UpdateDarkThemeSetting() {
 
 }  // namespace
 
-#if defined(USE_X11)
+#if defined(OS_LINUX)
 class DarkThemeObserver : public ui::NativeThemeObserver {
  public:
   DarkThemeObserver() = default;
@@ -350,7 +352,7 @@ int ElectronBrowserMainParts::PreCreateThreads() {
 #if defined(USE_AURA)
   display::Screen* screen = views::CreateDesktopScreen();
   display::Screen::SetScreenInstance(screen);
-#if defined(USE_X11)
+#if defined(OS_LINUX)
   views::LinuxUI::instance()->UpdateDeviceScaleFactor();
 #endif
 #endif
@@ -368,7 +370,7 @@ int ElectronBrowserMainParts::PreCreateThreads() {
   // Force MediaCaptureDevicesDispatcher to be created on UI thread.
   MediaCaptureDevicesDispatcher::GetInstance();
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   ui::InitIdleMonitor();
 #endif
 
@@ -432,7 +434,7 @@ void ElectronBrowserMainParts::ToolkitInitialized() {
     ui::CursorLoaderWin::SetCursorResourceModule(module_name);
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   views_delegate_.reset(new ViewsDelegateMac);
 #else
   views_delegate_ = std::make_unique<ViewsDelegate>();
@@ -486,7 +488,7 @@ void ElectronBrowserMainParts::PreMainMessageLoopRun() {
     DevToolsManagerDelegate::StartHttpHandler();
   }
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
   // The corresponding call in macOS is in ElectronApplicationDelegate.
   Browser::Get()->WillFinishLaunching();
   Browser::Get()->DidFinishLaunching(base::DictionaryValue());
@@ -530,7 +532,7 @@ void ElectronBrowserMainParts::PostMainMessageLoopRun() {
   ui::SetX11ErrorHandlers(X11EmptyErrorHandler, X11EmptyIOErrorHandler);
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   FreeAppDelegate();
 #endif
 
@@ -551,20 +553,23 @@ void ElectronBrowserMainParts::PostMainMessageLoopRun() {
   node_debugger_->Stop();
   node_env_->env()->set_trace_sync_io(false);
   js_env_->OnMessageLoopDestroying();
+  node::Stop(node_env_->env());
   node_env_.reset();
+
+  ElectronBrowserContext::browser_context_map().clear();
 
   fake_browser_process_->PostMainMessageLoopRun();
   content::DevToolsAgentHost::StopRemoteDebuggingPipeHandler();
 }
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
 void ElectronBrowserMainParts::PreMainMessageLoopStart() {
   PreMainMessageLoopStartCommon();
 }
 #endif
 
 void ElectronBrowserMainParts::PreMainMessageLoopStartCommon() {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   InitializeMainNib();
   RegisterURLHandler();
 #endif

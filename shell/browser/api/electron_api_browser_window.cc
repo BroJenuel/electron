@@ -93,7 +93,7 @@ BrowserWindow::BrowserWindow(gin::Arguments* args,
   // Install the content view after BaseWindow's JS code is initialized.
   SetContentView(gin::CreateHandle<View>(isolate, web_contents_view.get()));
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   OverrideNSWindowContentView(web_contents->managed_web_contents());
 #endif
 
@@ -157,10 +157,30 @@ void BrowserWindow::DidFirstVisuallyNonEmptyPaint() {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(
                      [](base::WeakPtr<BrowserWindow> self) {
-                       if (self)
+                       if (self && !self->did_ready_to_show_fired_) {
+                         self->did_ready_to_show_fired_ = true;
                          self->Emit("ready-to-show");
+                       }
                      },
                      GetWeakPtr()));
+}
+
+void BrowserWindow::DidFinishLoad(content::RenderFrameHost* render_frame_host,
+                                  const GURL& validated_url) {
+  // The DidFirstVisuallyNonEmptyPaint event is not very stable that, sometimes
+  // on some machines it might not be fired, and the actual behavior depends on
+  // the version of Chromium.
+  // To work around this bug, we ensure the ready-to-show event is emitted if it
+  // has not been emitted in did-finish-load event.
+  // Note that we use did-finish-load event instead of dom-ready event because
+  // the latter may actually be emitted before the ready-to-show event.
+  // See also https://github.com/electron/electron/issues/7779.
+  if (window()->IsVisible() || did_ready_to_show_fired_)
+    return;
+  if (render_frame_host->GetParent())  // child frame
+    return;
+  did_ready_to_show_fired_ = true;
+  Emit("ready-to-show");
 }
 
 void BrowserWindow::BeforeUnloadDialogCancelled() {
@@ -228,7 +248,7 @@ void BrowserWindow::OnSetContentBounds(const gfx::Rect& rect) {
 
 void BrowserWindow::OnActivateContents() {
   // Hide the auto-hide menu when webContents is focused.
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
   if (IsMenuBarAutoHide() && IsMenuBarVisible())
     window()->SetMenuBarVisibility(false);
 #endif
@@ -269,7 +289,7 @@ void BrowserWindow::OnCloseButtonClicked(bool* prevent_default) {
   // Required to make beforeunload handler work.
   api_web_contents_->NotifyUserActivation();
 
-  if (web_contents()->NeedToFireBeforeUnloadOrUnload())
+  if (web_contents()->NeedToFireBeforeUnloadOrUnloadEvents())
     web_contents()->DispatchBeforeUnload(false /* auto_cancel */);
   else
     web_contents()->Close();
@@ -295,7 +315,7 @@ void BrowserWindow::OnWindowBlur() {
 void BrowserWindow::OnWindowFocus() {
   web_contents()->RestoreFocus();
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
   if (!api_web_contents_->IsDevToolsOpened())
     web_contents()->Focus();
 #endif
@@ -304,7 +324,7 @@ void BrowserWindow::OnWindowFocus() {
 }
 
 void BrowserWindow::OnWindowIsKeyChanged(bool is_key) {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   auto* rwhv = web_contents()->GetRenderWidgetHostView();
   if (rwhv)
     rwhv->SetActive(is_key);
@@ -312,7 +332,7 @@ void BrowserWindow::OnWindowIsKeyChanged(bool is_key) {
 }
 
 void BrowserWindow::OnWindowResize() {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   if (!draggable_regions_.empty())
     UpdateDraggableRegions(draggable_regions_);
 #endif
@@ -320,11 +340,11 @@ void BrowserWindow::OnWindowResize() {
 }
 
 void BrowserWindow::OnWindowLeaveFullScreen() {
-  BaseWindow::OnWindowLeaveFullScreen();
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   if (web_contents()->IsFullscreen())
     web_contents()->ExitFullscreen(true);
 #endif
+  BaseWindow::OnWindowLeaveFullScreen();
 }
 
 void BrowserWindow::Focus() {
@@ -361,28 +381,28 @@ void BrowserWindow::SetBackgroundColor(const std::string& color_name) {
 void BrowserWindow::SetBrowserView(v8::Local<v8::Value> value) {
   BaseWindow::ResetBrowserViews();
   BaseWindow::AddBrowserView(value);
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   UpdateDraggableRegions(draggable_regions_);
 #endif
 }
 
 void BrowserWindow::AddBrowserView(v8::Local<v8::Value> value) {
   BaseWindow::AddBrowserView(value);
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   UpdateDraggableRegions(draggable_regions_);
 #endif
 }
 
 void BrowserWindow::RemoveBrowserView(v8::Local<v8::Value> value) {
   BaseWindow::RemoveBrowserView(value);
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   UpdateDraggableRegions(draggable_regions_);
 #endif
 }
 
 void BrowserWindow::ResetBrowserViews() {
   BaseWindow::ResetBrowserViews();
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   UpdateDraggableRegions(draggable_regions_);
 #endif
 }

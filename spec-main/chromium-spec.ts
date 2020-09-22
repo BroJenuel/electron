@@ -222,7 +222,7 @@ describe('web security', () => {
   });
 
   it('engages CORB when web security is not disabled', async () => {
-    const w = new BrowserWindow({ show: true, webPreferences: { webSecurity: true, nodeIntegration: true } });
+    const w = new BrowserWindow({ show: false, webPreferences: { webSecurity: true, nodeIntegration: true } });
     const p = emittedOnce(ipcMain, 'success');
     await w.loadURL(`data:text/html,<script>
         const s = document.createElement('script')
@@ -236,7 +236,7 @@ describe('web security', () => {
   });
 
   it('bypasses CORB when web security is disabled', async () => {
-    const w = new BrowserWindow({ show: true, webPreferences: { webSecurity: false, nodeIntegration: true } });
+    const w = new BrowserWindow({ show: false, webPreferences: { webSecurity: false, nodeIntegration: true } });
     const p = emittedOnce(ipcMain, 'success');
     await w.loadURL(`data:text/html,
       <script>
@@ -244,6 +244,48 @@ describe('web security', () => {
       </script>
       <script src="${serverUrl}"></script>`);
     await p;
+  });
+
+  it('engages CORS when web security is not disabled', async () => {
+    const w = new BrowserWindow({ show: false, webPreferences: { webSecurity: true, nodeIntegration: true } });
+    const p = emittedOnce(ipcMain, 'response');
+    await w.loadURL(`data:text/html,<script>
+        (async function() {
+          try {
+            await fetch('${serverUrl}');
+            require('electron').ipcRenderer.send('response', 'passed');
+          } catch {
+            require('electron').ipcRenderer.send('response', 'failed');
+          }
+        })();
+      </script>`);
+    const [, response] = await p;
+    expect(response).to.equal('failed');
+  });
+
+  it('bypasses CORS when web security is disabled', async () => {
+    const w = new BrowserWindow({ show: false, webPreferences: { webSecurity: false, nodeIntegration: true } });
+    const p = emittedOnce(ipcMain, 'response');
+    await w.loadURL(`data:text/html,<script>
+        (async function() {
+          try {
+            await fetch('${serverUrl}');
+            require('electron').ipcRenderer.send('response', 'passed');
+          } catch {
+            require('electron').ipcRenderer.send('response', 'failed');
+          }
+        })();
+      </script>`);
+    const [, response] = await p;
+    expect(response).to.equal('passed');
+  });
+
+  it('does not crash when multiple WebContent are created with web security disabled', () => {
+    const options = { show: false, webPreferences: { webSecurity: false } };
+    const w1 = new BrowserWindow(options);
+    w1.loadURL(serverUrl);
+    const w2 = new BrowserWindow(options);
+    w2.loadURL(serverUrl);
   });
 });
 
@@ -447,7 +489,8 @@ describe('chromium features', () => {
         show: false,
         webPreferences: {
           nodeIntegration: true,
-          nodeIntegrationInWorker: true
+          nodeIntegrationInWorker: true,
+          partition: 'sw-file-scheme-worker-spec'
         }
       });
 
@@ -458,7 +501,9 @@ describe('chromium features', () => {
           done(`unexpected error : ${message}`);
         } else if (channel === 'response') {
           expect(message).to.equal('Hello from serviceWorker!');
-          done();
+          session.fromPartition('sw-file-scheme-worker-spec').clearStorageData({
+            storages: ['serviceworkers']
+          }).then(() => done());
         }
       });
 
@@ -1246,10 +1291,6 @@ describe('chromium features', () => {
       w.loadURL(pdfSource);
       const [, contents] = await emittedOnce(app, 'web-contents-created');
       expect(contents.getURL()).to.equal('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html');
-      await new Promise((resolve) => {
-        contents.on('did-finish-load', resolve);
-        contents.on('did-frame-finish-load', resolve);
-      });
     });
 
     it('opens when loading a pdf resource in a iframe', async () => {
@@ -1257,10 +1298,6 @@ describe('chromium features', () => {
       w.loadFile(path.join(__dirname, 'fixtures', 'pages', 'pdf-in-iframe.html'));
       const [, contents] = await emittedOnce(app, 'web-contents-created');
       expect(contents.getURL()).to.equal('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html');
-      await new Promise((resolve) => {
-        contents.on('did-finish-load', resolve);
-        contents.on('did-frame-finish-load', resolve);
-      });
     });
   });
 

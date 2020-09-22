@@ -48,13 +48,15 @@
 #endif
 
 #if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
+#include "extensions/common/view_type.h"
+
 namespace extensions {
 class ScriptExecutor;
 }
 #endif
 
 namespace blink {
-struct WebDeviceEmulationParams;
+struct DeviceEmulationParams;
 }
 
 namespace gin_helper {
@@ -144,7 +146,7 @@ class WebContents : public gin::Wrappable<WebContents>,
                     public mojom::ElectronBrowser {
  public:
   enum class Type {
-    BACKGROUND_PAGE,  // A DevTools extension background page.
+    BACKGROUND_PAGE,  // An extension background page.
     BROWSER_WINDOW,   // Used by BrowserWindow.
     BROWSER_VIEW,     // Used by BrowserView.
     REMOTE,           // Thin wrap around an existing WebContents.
@@ -236,7 +238,7 @@ class WebContents : public gin::Wrappable<WebContents>,
   bool IsDevToolsOpened();
   bool IsDevToolsFocused();
   void ToggleDevTools();
-  void EnableDeviceEmulation(const blink::WebDeviceEmulationParams& params);
+  void EnableDeviceEmulation(const blink::DeviceEmulationParams& params);
   void DisableDeviceEmulation();
   void InspectElement(int x, int y);
   void InspectSharedWorker();
@@ -261,7 +263,7 @@ class WebContents : public gin::Wrappable<WebContents>,
                            bool silent,
                            base::string16 default_printer);
   void Print(gin::Arguments* args);
-  std::vector<printing::PrinterBasicInfo> GetPrinterList();
+  printing::PrinterList GetPrinterList();
   // Print current page as PDF.
   v8::Local<v8::Promise> PrintToPDF(base::DictionaryValue settings);
 #endif
@@ -393,6 +395,7 @@ class WebContents : public gin::Wrappable<WebContents>,
   content::WebContents* HostWebContents() const;
   v8::Local<v8::Value> DevToolsWebContents(v8::Isolate* isolate);
   v8::Local<v8::Value> Debugger(v8::Isolate* isolate);
+  bool WasInitiallyShown();
 
   WebContentsZoomController* GetZoomController() { return zoom_controller_; }
 
@@ -451,6 +454,12 @@ class WebContents : public gin::Wrappable<WebContents>,
       std::unique_ptr<content::WebContents> web_contents,
       gin::Handle<class Session> session,
       const gin_helper::Dictionary& options);
+
+#if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
+  void InitWithExtensionView(v8::Isolate* isolate,
+                             content::WebContents* web_contents,
+                             extensions::ViewType view_type);
+#endif
 
   // content::WebContentsDelegate:
   bool DidAddMessageToConsole(content::WebContents* source,
@@ -682,6 +691,8 @@ class WebContents : public gin::Wrappable<WebContents>,
 
   // Observers of this WebContents.
   base::ObserverList<ExtendedWebContentsObserver> observers_;
+
+  bool initially_shown_ = true;
 
   // The ID of the process of the currently committed RenderViewHost.
   // -1 means no speculative RVH has been committed yet.

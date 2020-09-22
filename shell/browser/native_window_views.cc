@@ -34,7 +34,6 @@
 #include "ui/base/hit_test.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/native_theme/native_theme.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/webview/unhandled_keyboard_event_handler.h"
 #include "ui/views/controls/webview/webview.h"
@@ -116,9 +115,9 @@ class NativeWindowClientView : public views::ClientView {
       : views::ClientView(widget, root_view), window_(window) {}
   ~NativeWindowClientView() override = default;
 
-  bool CanClose() override {
+  views::CloseRequestResult OnWindowCloseRequested() override {
     window_->NotifyWindowCloseButtonClicked();
-    return false;
+    return views::CloseRequestResult::kCannotClose;
   }
 
  private:
@@ -193,7 +192,7 @@ NativeWindowViews::NativeWindowViews(const gin_helper::Dictionary& options,
     params.parent = parent->GetNativeWindow();
 
   params.native_widget = new ElectronDesktopNativeWidgetAura(this);
-#elif defined(USE_X11)
+#elif defined(OS_LINUX)
   std::string name = Browser::Get()->GetName();
   // Set WM_WINDOW_ROLE.
   params.wm_role_name = "browser-window";
@@ -215,10 +214,10 @@ NativeWindowViews::NativeWindowViews(const gin_helper::Dictionary& options,
   window_state_watcher_ = std::make_unique<WindowStateWatcher>(this);
 
   // Set _GTK_THEME_VARIANT to dark if we have "dark-theme" option set.
-  bool use_dark_theme =
-      ui::NativeTheme::GetInstanceForNativeUi()->ShouldUseDarkColors();
-  options.Get(options::kDarkTheme, &use_dark_theme);
-  SetGTKDarkThemeEnabled(use_dark_theme);
+  bool use_dark_theme = false;
+  if (options.Get(options::kDarkTheme, &use_dark_theme) && use_dark_theme) {
+    SetGTKDarkThemeEnabled(use_dark_theme);
+  }
 
   // Before the window is mapped the SetWMSpecState can not work, so we have
   // to manually set the _NET_WM_STATE.
@@ -326,6 +325,20 @@ NativeWindowViews::~NativeWindowViews() {
   aura::Window* window = GetNativeWindow();
   if (window)
     window->RemovePreTargetHandler(this);
+#endif
+}
+
+void NativeWindowViews::SetGTKDarkThemeEnabled(bool use_dark_theme) {
+#if defined(USE_X11)
+  if (use_dark_theme) {
+    ui::SetStringProperty(static_cast<x11::Window>(GetAcceleratedWidget()),
+                          gfx::GetAtom("_GTK_THEME_VARIANT"),
+                          gfx::GetAtom("UTF8_STRING"), "dark");
+  } else {
+    ui::SetStringProperty(static_cast<x11::Window>(GetAcceleratedWidget()),
+                          gfx::GetAtom("_GTK_THEME_VARIANT"),
+                          gfx::GetAtom("UTF8_STRING"), "light");
+  }
 #endif
 }
 
@@ -469,7 +482,7 @@ void NativeWindowViews::SetEnabledInternal(bool enable) {
 #endif
 }
 
-#if defined(USE_X11)
+#if defined(OS_LINUX)
 void NativeWindowViews::Maximize() {
   if (IsVisible())
     widget()->Maximize();
@@ -785,7 +798,7 @@ bool NativeWindowViews::IsClosable() {
     return false;
   }
   return !(info.fState & MFS_DISABLED);
-#elif defined(USE_X11)
+#elif defined(OS_LINUX)
   return true;
 #endif
 }
@@ -1059,9 +1072,9 @@ void NativeWindowViews::AddBrowserView(NativeBrowserView* view) {
   }
 
   add_browser_view(view);
-
-  content_view()->AddChildView(
-      view->GetInspectableWebContentsView()->GetView());
+  if (view->GetInspectableWebContentsView())
+    content_view()->AddChildView(
+        view->GetInspectableWebContentsView()->GetView());
 }
 
 void NativeWindowViews::RemoveBrowserView(NativeBrowserView* view) {
@@ -1072,8 +1085,9 @@ void NativeWindowViews::RemoveBrowserView(NativeBrowserView* view) {
     return;
   }
 
-  content_view()->RemoveChildView(
-      view->GetInspectableWebContentsView()->GetView());
+  if (view->GetInspectableWebContentsView())
+    content_view()->RemoveChildView(
+        view->GetInspectableWebContentsView()->GetView());
   remove_browser_view(view);
 }
 
@@ -1081,12 +1095,11 @@ void NativeWindowViews::SetParentWindow(NativeWindow* parent) {
   NativeWindow::SetParentWindow(parent);
 
 #if defined(USE_X11)
-  XDisplay* xdisplay = gfx::GetXDisplay();
-  XSetTransientForHint(
-      xdisplay, static_cast<uint32_t>(GetAcceleratedWidget()),
-      static_cast<uint32_t>(
-          parent ? static_cast<x11::Window>(parent->GetAcceleratedWidget())
-                 : ui::GetX11RootWindow()));
+  ui::SetProperty(static_cast<x11::Window>(GetAcceleratedWidget()),
+                  x11::Atom::WM_TRANSIENT_FOR, x11::Atom::WINDOW,
+                  parent
+                      ? static_cast<x11::Window>(parent->GetAcceleratedWidget())
+                      : ui::GetX11RootWindow());
 #elif defined(OS_WIN)
   // To set parentship between windows into Windows is better to play with the
   //  owner instead of the parent, as Windows natively seems to do if a parent
@@ -1124,7 +1137,7 @@ void NativeWindowViews::SetProgressBar(double progress,
                                        NativeWindow::ProgressState state) {
 #if defined(OS_WIN)
   taskbar_host_.SetProgressBar(GetAcceleratedWidget(), progress, state);
-#elif defined(USE_X11)
+#elif defined(OS_LINUX)
   if (unity::IsRunning()) {
     unity::SetProgressFraction(progress);
   }
@@ -1154,7 +1167,8 @@ bool NativeWindowViews::IsMenuBarVisible() {
   return root_view_->IsMenuBarVisible();
 }
 
-void NativeWindowViews::SetVisibleOnAllWorkspaces(bool visible) {
+void NativeWindowViews::SetVisibleOnAllWorkspaces(bool visible,
+                                                  bool visibleOnFullScreen) {
   widget()->SetVisibleOnAllWorkspaces(visible);
 }
 
@@ -1179,7 +1193,7 @@ content::DesktopMediaID NativeWindowViews::GetDesktopMediaID() const {
 #if defined(OS_WIN)
   window_handle =
       reinterpret_cast<content::DesktopMediaID::Id>(accelerated_widget);
-#elif defined(USE_X11)
+#elif defined(OS_LINUX)
   window_handle = static_cast<uint32_t>(accelerated_widget);
 #endif
   aura::WindowTreeHost* const host =
@@ -1282,25 +1296,11 @@ void NativeWindowViews::SetIcon(HICON window_icon, HICON app_icon) {
   SendMessage(hwnd, WM_SETICON, ICON_BIG,
               reinterpret_cast<LPARAM>(app_icon_.get()));
 }
-#elif defined(USE_X11)
+#elif defined(OS_LINUX)
 void NativeWindowViews::SetIcon(const gfx::ImageSkia& icon) {
   auto* tree_host = views::DesktopWindowTreeHostLinux::GetHostForWidget(
       GetAcceleratedWidget());
   tree_host->SetWindowIcons(icon, {});
-}
-#endif
-
-#if defined(USE_X11)
-void NativeWindowViews::SetGTKDarkThemeEnabled(bool use_dark_theme) {
-  if (use_dark_theme) {
-    ui::SetStringProperty(static_cast<x11::Window>(GetAcceleratedWidget()),
-                          gfx::GetAtom("_GTK_THEME_VARIANT"),
-                          gfx::GetAtom("UTF8_STRING"), "dark");
-  } else {
-    ui::SetStringProperty(static_cast<x11::Window>(GetAcceleratedWidget()),
-                          gfx::GetAtom("_GTK_THEME_VARIANT"),
-                          gfx::GetAtom("UTF8_STRING"), "light");
-  }
 }
 #endif
 
@@ -1381,7 +1381,7 @@ bool NativeWindowViews::CanMaximize() const {
 bool NativeWindowViews::CanMinimize() const {
 #if defined(OS_WIN)
   return minimizable_;
-#elif defined(USE_X11)
+#elif defined(OS_LINUX)
   return true;
 #endif
 }
