@@ -274,7 +274,7 @@ webview.addEventListener('dom-ready', () => {
   * `httpReferrer` (String | [Referrer](structures/referrer.md)) (optional) - An HTTP Referrer url.
   * `userAgent` String (optional) - A user agent originating the request.
   * `extraHeaders` String (optional) - Extra headers separated by "\n"
-  * `postData` ([UploadRawData[]](structures/upload-raw-data.md) | [UploadFile[]](structures/upload-file.md) | [UploadBlob[]](structures/upload-blob.md)) (optional)
+  * `postData` ([UploadRawData[]](structures/upload-raw-data.md) | [UploadFile[]](structures/upload-file.md)) (optional)
   * `baseURLForDataURL` String (optional) - Base url (with trailing path separator) for files to be loaded by the data url. This is needed only if the specified `url` is a data url and needs to load other files.
 
 Returns `Promise<void>` - The promise will resolve when the page has finished loading
@@ -519,12 +519,6 @@ Inserts `text` to the focused element.
     defaults to `false`.
   * `matchCase` Boolean (optional) - Whether search should be case-sensitive,
     defaults to `false`.
-  * `wordStart` Boolean (optional) - Whether to look only at the start of words.
-    defaults to `false`.
-  * `medialCapitalAsWordStart` Boolean (optional) - When combined with `wordStart`,
-    accepts a match in the middle of a word if the match begins with an
-    uppercase letter followed by a lowercase or non-letter.
-    Accepts several other intra-word matches, defaults to `false`.
 
 Returns `Integer` - The request id used for the request.
 
