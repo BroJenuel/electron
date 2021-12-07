@@ -1,3 +1,5 @@
+# Menu
+
 ## Class: Menu
 
 > Create native application menus and context menus.
@@ -22,8 +24,10 @@ Sets `menu` as the application menu on macOS. On Windows and Linux, the
 Also on Windows and Linux, you can use a `&` in the top-level item name to
 indicate which letter should get a generated accelerator. For example, using
 `&File` for the file menu would result in a generated `Alt-F` accelerator that
-opens the associated menu. The indicated character in the button label gets an
-underline. The `&` character is not displayed on the button label.
+opens the associated menu. The indicated character in the button label then gets an
+underline, and the `&` character is not displayed on the button label.
+
+In order to escape the `&` character in an item name, add a proceeding `&`. For example, `&&File` would result in `&File` displayed on the button label.
 
 Passing `null` will suppress the default menu. On Windows and Linux,
 this has the additional effect of removing the menu bar from the window.
@@ -41,7 +45,7 @@ be dynamically modified.
 
 #### `Menu.sendActionToFirstResponder(action)` _macOS_
 
-* `action` String
+* `action` string
 
 Sends the `action` to the first responder of application. This is used for
 emulating default macOS menu behaviors. Usually you would use the
@@ -69,11 +73,11 @@ The `menu` object has the following instance methods:
 
 * `options` Object (optional)
   * `window` [BrowserWindow](browser-window.md) (optional) - Default is the focused window.
-  * `x` Number (optional) - Default is the current mouse cursor position.
+  * `x` number (optional) - Default is the current mouse cursor position.
     Must be declared if `y` is declared.
-  * `y` Number (optional) - Default is the current mouse cursor position.
+  * `y` number (optional) - Default is the current mouse cursor position.
     Must be declared if `x` is declared.
-  * `positioningItem` Number (optional) _macOS_ - The index of the menu item to
+  * `positioningItem` number (optional) _macOS_ - The index of the menu item to
     be positioned under the mouse cursor at the specified coordinates. Default
     is -1.
   * `callback` Function (optional) - Called when menu is closed.
@@ -94,7 +98,7 @@ Appends the `menuItem` to the menu.
 
 #### `menu.getMenuItemById(id)`
 
-* `id` String
+* `id` string
 
 Returns `MenuItem | null` the item with the specified `id`
 
@@ -158,7 +162,7 @@ const template = [
       { role: 'services' },
       { type: 'separator' },
       { role: 'hide' },
-      { role: 'hideothers' },
+      { role: 'hideOthers' },
       { role: 'unhide' },
       { type: 'separator' },
       { role: 'quit' }
@@ -401,4 +405,4 @@ Menu:
 ```
 
 [AboutInformationPropertyListFiles]: https://developer.apple.com/library/ios/documentation/general/Reference/InfoPlistKeyReference/Articles/AboutInformationPropertyListFiles.html
-[setMenu]: https://github.com/electron/electron/blob/master/docs/api/browser-window.md#winsetmenumenu-linux-windows
+[setMenu]: browser-window.md#winsetmenumenu-linux-windows

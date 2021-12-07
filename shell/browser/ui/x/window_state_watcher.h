@@ -2,8 +2,8 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_BROWSER_UI_X_WINDOW_STATE_WATCHER_H_
-#define SHELL_BROWSER_UI_X_WINDOW_STATE_WATCHER_H_
+#ifndef ELECTRON_SHELL_BROWSER_UI_X_WINDOW_STATE_WATCHER_H_
+#define ELECTRON_SHELL_BROWSER_UI_X_WINDOW_STATE_WATCHER_H_
 
 #include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/gfx/x/event.h"
@@ -17,6 +17,10 @@ class WindowStateWatcher : public x11::EventObserver {
   explicit WindowStateWatcher(NativeWindowViews* window);
   ~WindowStateWatcher() override;
 
+  // disable copy
+  WindowStateWatcher(const WindowStateWatcher&) = delete;
+  WindowStateWatcher& operator=(const WindowStateWatcher&) = delete;
+
  protected:
   // x11::EventObserver:
   void OnEvent(const x11::Event& x11_event) override;
@@ -26,11 +30,13 @@ class WindowStateWatcher : public x11::EventObserver {
 
   NativeWindowViews* window_;
   gfx::AcceleratedWidget widget_;
-  const x11::Atom window_state_atom_;
-
-  DISALLOW_COPY_AND_ASSIGN(WindowStateWatcher);
+  const x11::Atom net_wm_state_atom_;
+  const x11::Atom net_wm_state_hidden_atom_;
+  const x11::Atom net_wm_state_maximized_vert_atom_;
+  const x11::Atom net_wm_state_maximized_horz_atom_;
+  const x11::Atom net_wm_state_fullscreen_atom_;
 };
 
 }  // namespace electron
 
-#endif  // SHELL_BROWSER_UI_X_WINDOW_STATE_WATCHER_H_
+#endif  // ELECTRON_SHELL_BROWSER_UI_X_WINDOW_STATE_WATCHER_H_

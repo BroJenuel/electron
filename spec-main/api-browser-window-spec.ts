@@ -5,10 +5,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as qs from 'querystring';
 import * as http from 'http';
+import * as semver from 'semver';
 import { AddressInfo } from 'net';
-import { app, BrowserWindow, BrowserView, ipcMain, OnBeforeSendHeadersListenerDetails, protocol, screen, webContents, session, WebContents } from 'electron/main';
+import { app, BrowserWindow, BrowserView, dialog, ipcMain, OnBeforeSendHeadersListenerDetails, protocol, screen, webContents, session, WebContents, BrowserWindowConstructorOptions } from 'electron/main';
 
-import { emittedOnce, emittedUntil } from './events-helpers';
+import { emittedOnce, emittedUntil, emittedNTimes } from './events-helpers';
 import { ifit, ifdescribe, defer, delay } from './spec-helpers';
 import { closeWindow, closeAllWindows } from './window-helpers';
 
@@ -62,6 +63,15 @@ describe('BrowserWindow module', () => {
       const appProcess = childProcess.spawn(process.execPath, [appPath]);
       await new Promise((resolve) => { appProcess.once('exit', resolve); });
     });
+
+    it('does not crash or throw when passed an invalid icon', async () => {
+      expect(() => {
+        const w = new BrowserWindow({
+          icon: undefined
+        } as any);
+        w.destroy();
+      }).not.to.throw();
+    });
   });
 
   describe('garbage collection', () => {
@@ -72,7 +82,7 @@ describe('BrowserWindow module', () => {
       const w = new BrowserWindow({ show: false });
       // Keep a weak reference to the window.
       // eslint-disable-next-line no-undef
-      const wr = new (globalThis as any).WeakRef(w);
+      const wr = new WeakRef(w);
       await delay();
       // Do garbage collection, since |w| is not referenced in this closure
       // it would be gone after next call if there is no other reference.
@@ -86,11 +96,23 @@ describe('BrowserWindow module', () => {
   describe('BrowserWindow.close()', () => {
     let w = null as unknown as BrowserWindow;
     beforeEach(() => {
-      w = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: true } });
+      w = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: true, contextIsolation: false } });
     });
     afterEach(async () => {
       await closeWindow(w);
       w = null as unknown as BrowserWindow;
+    });
+
+    it('should work if called when a messageBox is showing', async () => {
+      const closed = emittedOnce(w, 'closed');
+      dialog.showMessageBox(w, { message: 'Hello Error' });
+      w.close();
+      await closed;
+    });
+
+    it('should not crash if called after webContents is destroyed', () => {
+      w.webContents.destroy();
+      w.webContents.on('destroyed', () => w.close());
     });
 
     it('should emit unload handler', async () => {
@@ -108,6 +130,14 @@ describe('BrowserWindow module', () => {
       await w.loadFile(path.join(__dirname, 'fixtures', 'api', 'beforeunload-false.html'));
       w.close();
       await emittedOnce(w.webContents, 'before-unload-fired');
+    });
+
+    it('should not crash when keyboard event is sent before closing', async () => {
+      await w.loadURL('data:text/html,pls no crash');
+      const closed = emittedOnce(w, 'closed');
+      w.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+      w.close();
+      await closed;
     });
 
     describe('when invoked synchronously inside navigation observer', () => {
@@ -173,7 +203,7 @@ describe('BrowserWindow module', () => {
   describe('window.close()', () => {
     let w = null as unknown as BrowserWindow;
     beforeEach(() => {
-      w = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: true } });
+      w = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: true, contextIsolation: false } });
     });
     afterEach(async () => {
       await closeWindow(w);
@@ -382,8 +412,7 @@ describe('BrowserWindow module', () => {
       await expect(p).to.eventually.be.fulfilled;
     });
 
-    // FIXME(robo/nornagon): re-enable these once service workers work
-    describe.skip('POST navigations', () => {
+    describe('POST navigations', () => {
       afterEach(() => { w.webContents.session.webRequest.onBeforeSendHeaders(null); });
 
       it('supports specifying POST data', async () => {
@@ -428,11 +457,9 @@ describe('BrowserWindow module', () => {
       });
     });
 
-    it('should support support base url for data urls', async () => {
-      const answer = emittedOnce(ipcMain, 'answer');
-      w.loadURL('data:text/html,<script src="loaded-from-dataurl.js"></script>', { baseURLForDataURL: `other://${path.join(fixtures, 'api')}${path.sep}` });
-      const [, test] = await answer;
-      expect(test).to.equal('test');
+    it('should support base url for data urls', async () => {
+      await w.loadURL('data:text/html,<script src="loaded-from-dataurl.js"></script>', { baseURLForDataURL: `other://${path.join(fixtures, 'api')}${path.sep}` });
+      expect(await w.webContents.executeJavaScript('window.ping')).to.equal('pong');
     });
   });
 
@@ -750,8 +777,10 @@ describe('BrowserWindow module', () => {
         expect(otherWindow.isFocused()).to.equal(true);
 
         const wFocused = emittedOnce(w, 'focus');
+        const otherWindowBlurred = emittedOnce(otherWindow, 'blur');
         w.focus();
         await wFocused;
+        await otherWindowBlurred;
         expect(w.isFocused()).to.equal(true);
 
         otherWindow.moveTop();
@@ -820,6 +849,17 @@ describe('BrowserWindow module', () => {
         w2.setFocusable(true);
         w2.focus();
         await w2Focused;
+        await closeWindow(w2, { assertNotWindows: false });
+      });
+    });
+
+    describe('BrowserWindow.isFocusable()', () => {
+      it('correctly returns whether a window is focusable', async () => {
+        const w2 = new BrowserWindow({ focusable: false });
+        expect(w2.isFocusable()).to.be.false();
+
+        w2.setFocusable(true);
+        expect(w2.isFocusable()).to.be.true();
         await closeWindow(w2, { assertNotWindows: false });
       });
     });
@@ -911,6 +951,17 @@ describe('BrowserWindow module', () => {
         w.setSize(size[0], size[1]);
         await resize;
         expectBoundsEqual(w.getSize(), size);
+      });
+
+      it('doesn\'t change bounds when maximum size is set', () => {
+        w.setMenu(null);
+        w.setMaximumSize(400, 400);
+        // Without https://github.com/electron/electron/pull/29101
+        // following call would shrink the window to 384x361.
+        // There would be also DCHECK in resize_utils.cc on
+        // debug build.
+        w.setAspectRatio(1.0);
+        expectBoundsEqual(w.getSize(), [400, 400]);
       });
     });
 
@@ -1077,6 +1128,24 @@ describe('BrowserWindow module', () => {
           w.unmaximize();
           await unmaximize;
           expect(w.isMaximized()).to.equal(false);
+        });
+        it('returns the correct value for windows with an aspect ratio', async () => {
+          w.destroy();
+          w = new BrowserWindow({
+            show: false,
+            fullscreenable: false
+          });
+
+          w.setAspectRatio(16 / 11);
+
+          const maximize = emittedOnce(w, 'resize');
+          w.show();
+          w.maximize();
+          await maximize;
+
+          expect(w.isMaximized()).to.equal(true);
+          w.resizable = false;
+          expect(w.isMaximized()).to.equal(true);
         });
       });
 
@@ -1323,6 +1392,22 @@ describe('BrowserWindow module', () => {
       expect(image.isEmpty()).to.equal(true);
     });
 
+    it('resolves after the window is hidden', async () => {
+      const w = new BrowserWindow({ show: false });
+      w.loadFile(path.join(fixtures, 'pages', 'a.html'));
+      await emittedOnce(w, 'ready-to-show');
+      w.show();
+
+      const visibleImage = await w.capturePage();
+      expect(visibleImage.isEmpty()).to.equal(false);
+
+      w.hide();
+
+      const hiddenImage = await w.capturePage();
+      const isEmpty = process.platform !== 'darwin';
+      expect(hiddenImage.isEmpty()).to.equal(isEmpty);
+    });
+
     it('preserves transparency', async () => {
       const w = new BrowserWindow({ show: false, transparent: true });
       w.loadFile(path.join(fixtures, 'pages', 'theme-color.html'));
@@ -1380,13 +1465,10 @@ describe('BrowserWindow module', () => {
   describe('BrowserWindow.setAlwaysOnTop(flag, level)', () => {
     let w = null as unknown as BrowserWindow;
 
+    afterEach(closeAllWindows);
+
     beforeEach(() => {
       w = new BrowserWindow({ show: true });
-    });
-
-    afterEach(async () => {
-      await closeWindow(w);
-      w = null as unknown as BrowserWindow;
     });
 
     it('sets the window as always on top', () => {
@@ -1416,6 +1498,16 @@ describe('BrowserWindow module', () => {
       const [, alwaysOnTop] = await alwaysOnTopChanged;
       expect(alwaysOnTop).to.be.true('is not alwaysOnTop');
     });
+
+    ifit(process.platform === 'darwin')('honors the alwaysOnTop level of a child window', () => {
+      w = new BrowserWindow({ show: false });
+      const c = new BrowserWindow({ parent: w });
+      c.setAlwaysOnTop(true, 'screen-saver');
+
+      expect(w.isAlwaysOnTop()).to.be.false();
+      expect(c.isAlwaysOnTop()).to.be.true('child is not always on top');
+      expect((c as any)._getAlwaysOnTopLevel()).to.equal('screen-saver');
+    });
   });
 
   describe('preconnect feature', () => {
@@ -1437,7 +1529,7 @@ describe('BrowserWindow module', () => {
       });
       server.on('connection', () => { connections++; });
 
-      await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+      await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
       url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     });
     afterEach(async () => {
@@ -1509,15 +1601,41 @@ describe('BrowserWindow module', () => {
       }).to.not.throw();
     });
 
-    it('throws with custom title bar buttons', () => {
-      expect(() => {
-        const w = new BrowserWindow({
-          show: false,
-          titleBarStyle: 'customButtonsOnHover',
-          frame: false
-        });
-        w.setWindowButtonVisibility(true);
-      }).to.throw('Not supported for this window');
+    it('changes window button visibility for normal window', () => {
+      const w = new BrowserWindow({ show: false });
+      expect(w._getWindowButtonVisibility()).to.equal(true);
+      w.setWindowButtonVisibility(false);
+      expect(w._getWindowButtonVisibility()).to.equal(false);
+      w.setWindowButtonVisibility(true);
+      expect(w._getWindowButtonVisibility()).to.equal(true);
+    });
+
+    it('changes window button visibility for frameless window', () => {
+      const w = new BrowserWindow({ show: false, frame: false });
+      expect(w._getWindowButtonVisibility()).to.equal(false);
+      w.setWindowButtonVisibility(true);
+      expect(w._getWindowButtonVisibility()).to.equal(true);
+      w.setWindowButtonVisibility(false);
+      expect(w._getWindowButtonVisibility()).to.equal(false);
+    });
+
+    it('changes window button visibility for hiddenInset window', () => {
+      const w = new BrowserWindow({ show: false, frame: false, titleBarStyle: 'hiddenInset' });
+      expect(w._getWindowButtonVisibility()).to.equal(true);
+      w.setWindowButtonVisibility(false);
+      expect(w._getWindowButtonVisibility()).to.equal(false);
+      w.setWindowButtonVisibility(true);
+      expect(w._getWindowButtonVisibility()).to.equal(true);
+    });
+
+    // Buttons of customButtonsOnHover are always hidden unless hovered.
+    it('does not change window button visibility for customButtonsOnHover window', () => {
+      const w = new BrowserWindow({ show: false, frame: false, titleBarStyle: 'customButtonsOnHover' });
+      expect(w._getWindowButtonVisibility()).to.equal(false);
+      w.setWindowButtonVisibility(true);
+      expect(w._getWindowButtonVisibility()).to.equal(false);
+      w.setWindowButtonVisibility(false);
+      expect(w._getWindowButtonVisibility()).to.equal(false);
     });
   });
 
@@ -1532,6 +1650,13 @@ describe('BrowserWindow module', () => {
         w.setVibrancy(null);
         w.setVibrancy('ultra-dark');
         w.setVibrancy('' as any);
+      }).to.not.throw();
+    });
+
+    it('does not crash if vibrancy is set to an invalid value', () => {
+      const w = new BrowserWindow({ show: false });
+      expect(() => {
+        w.setVibrancy('i-am-not-a-valid-vibrancy-type' as any);
       }).to.not.throw();
     });
   });
@@ -1786,8 +1911,47 @@ describe('BrowserWindow module', () => {
     });
   });
 
-  ifdescribe(process.platform === 'darwin' && parseInt(os.release().split('.')[0]) >= 14)('"titleBarStyle" option', () => {
+  ifdescribe(process.platform === 'win32' || (process.platform === 'darwin' && semver.gte(os.release(), '14.0.0')))('"titleBarStyle" option', () => {
+    const testWindowsOverlay = async (style: any) => {
+      const w = new BrowserWindow({
+        show: false,
+        width: 400,
+        height: 400,
+        titleBarStyle: style,
+        webPreferences: {
+          nodeIntegration: true,
+          contextIsolation: false
+        },
+        titleBarOverlay: true
+      });
+      const overlayHTML = path.join(__dirname, 'fixtures', 'pages', 'overlay.html');
+      if (process.platform === 'darwin') {
+        await w.loadFile(overlayHTML);
+      } else {
+        const overlayReady = emittedOnce(ipcMain, 'geometrychange');
+        await w.loadFile(overlayHTML);
+        await overlayReady;
+      }
+      const overlayEnabled = await w.webContents.executeJavaScript('navigator.windowControlsOverlay.visible');
+      expect(overlayEnabled).to.be.true('overlayEnabled');
+      const overlayRect = await w.webContents.executeJavaScript('getJSOverlayProperties()');
+      expect(overlayRect.y).to.equal(0);
+      if (process.platform === 'darwin') {
+        expect(overlayRect.x).to.be.greaterThan(0);
+      } else {
+        expect(overlayRect.x).to.equal(0);
+      }
+      expect(overlayRect.width).to.be.greaterThan(0);
+      expect(overlayRect.height).to.be.greaterThan(0);
+      const cssOverlayRect = await w.webContents.executeJavaScript('getCssOverlayProperties();');
+      expect(cssOverlayRect).to.deep.equal(overlayRect);
+      const geometryChange = emittedOnce(ipcMain, 'geometrychange');
+      w.setBounds({ width: 800 });
+      const [, newOverlayRect] = await geometryChange;
+      expect(newOverlayRect.width).to.equal(overlayRect.width + 400);
+    };
     afterEach(closeAllWindows);
+    afterEach(() => { ipcMain.removeAllListeners('geometrychange'); });
     it('creates browser window with hidden title bar', () => {
       const w = new BrowserWindow({
         show: false,
@@ -1798,7 +1962,7 @@ describe('BrowserWindow module', () => {
       const contentSize = w.getContentSize();
       expect(contentSize).to.deep.equal([400, 400]);
     });
-    it('creates browser window with hidden inset title bar', () => {
+    ifit(process.platform === 'darwin')('creates browser window with hidden inset title bar', () => {
       const w = new BrowserWindow({
         show: false,
         width: 400,
@@ -1807,6 +1971,12 @@ describe('BrowserWindow module', () => {
       });
       const contentSize = w.getContentSize();
       expect(contentSize).to.deep.equal([400, 400]);
+    });
+    it('sets Window Control Overlay with hidden title bar', async () => {
+      await testWindowsOverlay('hidden');
+    });
+    ifit(process.platform === 'darwin')('sets Window Control Overlay with hidden inset title bar', async () => {
+      await testWindowsOverlay('hiddenInset');
     });
   });
 
@@ -1967,6 +2137,7 @@ describe('BrowserWindow module', () => {
           show: false,
           webPreferences: {
             nodeIntegration: true,
+            contextIsolation: false,
             preload
           }
         });
@@ -1974,26 +2145,13 @@ describe('BrowserWindow module', () => {
         const [, test] = await emittedOnce(ipcMain, 'answer');
         expect(test).to.eql('preload');
       });
-      ifit(features.isRemoteModuleEnabled())('can successfully delete the Buffer global', async () => {
-        const preload = path.join(__dirname, 'fixtures', 'remote', 'delete-buffer.js');
-        const w = new BrowserWindow({
-          show: false,
-          webPreferences: {
-            nodeIntegration: true,
-            enableRemoteModule: true,
-            preload
-          }
-        });
-        w.loadFile(path.join(fixtures, 'api', 'preload.html'));
-        const [, test] = await emittedOnce(ipcMain, 'answer');
-        expect(test).to.eql(Buffer.from('buffer'));
-      });
       it('has synchronous access to all eventual window APIs', async () => {
         const preload = path.join(fixtures, 'module', 'access-blink-apis.js');
         const w = new BrowserWindow({
           show: false,
           webPreferences: {
             nodeIntegration: true,
+            contextIsolation: false,
             preload
           }
         });
@@ -2033,7 +2191,8 @@ describe('BrowserWindow module', () => {
               show: false,
               webPreferences: {
                 sandbox,
-                preload: path.join(fixtures, 'module', 'get-global-preload.js')
+                preload: path.join(fixtures, 'module', 'get-global-preload.js'),
+                contextIsolation: false
               }
             });
             w.loadURL('about:blank');
@@ -2087,7 +2246,8 @@ describe('BrowserWindow module', () => {
         const w = new BrowserWindow({
           show: false,
           webPreferences: {
-            preload
+            preload,
+            contextIsolation: false
           }
         });
         w.loadFile(path.join(fixtures, 'api', 'blank.html'));
@@ -2095,61 +2255,6 @@ describe('BrowserWindow module', () => {
         expect(typeofProcess).to.equal('undefined');
         expect(typeofBuffer).to.equal('undefined');
       });
-    });
-
-    ifdescribe(features.isRemoteModuleEnabled())('"enableRemoteModule" option', () => {
-      const generateSpecs = (description: string, sandbox: boolean) => {
-        describe(description, () => {
-          const preload = path.join(__dirname, 'fixtures', 'remote', 'preload-remote.js');
-
-          it('disables the remote module by default', async () => {
-            const w = new BrowserWindow({
-              show: false,
-              webPreferences: {
-                preload,
-                sandbox
-              }
-            });
-            const p = emittedOnce(ipcMain, 'remote');
-            w.loadFile(path.join(fixtures, 'api', 'blank.html'));
-            const [, remote] = await p;
-            expect(remote).to.equal('undefined');
-          });
-
-          it('disables the remote module when false', async () => {
-            const w = new BrowserWindow({
-              show: false,
-              webPreferences: {
-                preload,
-                sandbox,
-                enableRemoteModule: false
-              }
-            });
-            const p = emittedOnce(ipcMain, 'remote');
-            w.loadFile(path.join(fixtures, 'api', 'blank.html'));
-            const [, remote] = await p;
-            expect(remote).to.equal('undefined');
-          });
-
-          it('enables the remote module when true', async () => {
-            const w = new BrowserWindow({
-              show: false,
-              webPreferences: {
-                preload,
-                sandbox,
-                enableRemoteModule: true
-              }
-            });
-            const p = emittedOnce(ipcMain, 'remote');
-            w.loadFile(path.join(fixtures, 'api', 'blank.html'));
-            const [, remote] = await p;
-            expect(remote).to.equal('object');
-          });
-        });
-      };
-
-      generateSpecs('without sandbox', false);
-      generateSpecs('with sandbox', true);
     });
 
     describe('"sandbox" option', () => {
@@ -2182,7 +2287,8 @@ describe('BrowserWindow module', () => {
           show: false,
           webPreferences: {
             sandbox: true,
-            preload
+            preload,
+            contextIsolation: false
           }
         });
         w.loadFile(path.join(fixtures, 'api', 'preload.html'));
@@ -2196,7 +2302,8 @@ describe('BrowserWindow module', () => {
           show: false,
           webPreferences: {
             sandbox: true,
-            preload: preloadSpecialChars
+            preload: preloadSpecialChars,
+            contextIsolation: false
           }
         });
         w.loadFile(path.join(fixtures, 'api', 'preload.html'));
@@ -2221,7 +2328,8 @@ describe('BrowserWindow module', () => {
           show: false,
           webPreferences: {
             sandbox: true,
-            preload
+            preload,
+            contextIsolation: false
           }
         });
         const htmlPath = path.join(__dirname, 'fixtures', 'api', 'sandbox.html?exit-event');
@@ -2239,7 +2347,8 @@ describe('BrowserWindow module', () => {
           show: true,
           webPreferences: {
             sandbox: true,
-            preload
+            preload,
+            contextIsolation: false
           }
         });
 
@@ -2273,7 +2382,8 @@ describe('BrowserWindow module', () => {
           show: true,
           webPreferences: {
             sandbox: true,
-            preload
+            preload,
+            contextIsolation: false
           }
         });
 
@@ -2356,14 +2466,14 @@ describe('BrowserWindow module', () => {
         });
 
         const preloadPath = path.join(fixtures, 'api', 'new-window-preload.js');
-        w.webContents.setWindowOpenHandler(() => ({ action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: preloadPath, foo: 'bar' } } }));
+        w.webContents.setWindowOpenHandler(() => ({ action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: preloadPath, contextIsolation: false } } }));
         w.loadFile(path.join(fixtures, 'api', 'new-window.html'));
         const [[, childWebContents]] = await Promise.all([
           emittedOnce(app, 'web-contents-created'),
           emittedOnce(ipcMain, 'answer')
         ]);
         const webPreferences = childWebContents.getLastWebPreferences();
-        expect(webPreferences.foo).to.equal('bar');
+        expect(webPreferences.contextIsolation).to.equal(false);
       });
 
       it('should set ipc event sender correctly', async () => {
@@ -2371,11 +2481,12 @@ describe('BrowserWindow module', () => {
           show: false,
           webPreferences: {
             sandbox: true,
-            preload
+            preload,
+            contextIsolation: false
           }
         });
         let childWc: WebContents | null = null;
-        w.webContents.setWindowOpenHandler(() => ({ action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload } } }));
+        w.webContents.setWindowOpenHandler(() => ({ action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload, contextIsolation: false } } }));
 
         w.webContents.on('did-create-window', (win) => {
           childWc = win.webContents;
@@ -2461,89 +2572,13 @@ describe('BrowserWindow module', () => {
         w.loadFile(path.join(fixtures, 'pages', 'window-open.html'));
       });
 
-      // see #9387
-      ifit(features.isRemoteModuleEnabled())('properly manages remote object references after page reload', (done) => {
-        const w = new BrowserWindow({
-          show: false,
-          webPreferences: {
-            preload,
-            sandbox: true,
-            enableRemoteModule: true
-          }
-        });
-        w.loadFile(path.join(__dirname, 'fixtures', 'api', 'sandbox.html'), { search: 'reload-remote' });
-
-        ipcMain.on('get-remote-module-path', (event) => {
-          event.returnValue = path.join(fixtures, 'module', 'hello.js');
-        });
-
-        let reload = false;
-        ipcMain.on('reloaded', (event) => {
-          event.returnValue = reload;
-          reload = !reload;
-        });
-
-        ipcMain.once('reload', (event) => {
-          event.sender.reload();
-        });
-
-        ipcMain.once('answer', (event, arg) => {
-          ipcMain.removeAllListeners('reloaded');
-          ipcMain.removeAllListeners('get-remote-module-path');
-          try {
-            expect(arg).to.equal('hi');
-            done();
-          } catch (e) {
-            done(e);
-          }
-        });
-      });
-
-      ifit(features.isRemoteModuleEnabled())('properly manages remote object references after page reload in child window', (done) => {
-        const w = new BrowserWindow({
-          show: false,
-          webPreferences: {
-            preload,
-            sandbox: true,
-            enableRemoteModule: true
-          }
-        });
-        w.webContents.setWindowOpenHandler(() => ({ action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload } } }));
-
-        w.loadFile(path.join(__dirname, 'fixtures', 'api', 'sandbox.html'), { search: 'reload-remote-child' });
-
-        ipcMain.on('get-remote-module-path', (event) => {
-          event.returnValue = path.join(fixtures, 'module', 'hello-child.js');
-        });
-
-        let reload = false;
-        ipcMain.on('reloaded', (event) => {
-          event.returnValue = reload;
-          reload = !reload;
-        });
-
-        ipcMain.once('reload', (event) => {
-          event.sender.reload();
-        });
-
-        ipcMain.once('answer', (event, arg) => {
-          ipcMain.removeAllListeners('reloaded');
-          ipcMain.removeAllListeners('get-remote-module-path');
-          try {
-            expect(arg).to.equal('hi child window');
-            done();
-          } catch (e) {
-            done(e);
-          }
-        });
-      });
-
       it('validates process APIs access in sandboxed renderer', async () => {
         const w = new BrowserWindow({
           show: false,
           webPreferences: {
             sandbox: true,
-            preload
+            preload,
+            contextIsolation: false
           }
         });
         w.webContents.once('preload-error', (event, preloadPath, error) => {
@@ -2566,9 +2601,11 @@ describe('BrowserWindow module', () => {
         expect(test.env).to.deep.equal(process.env);
         expect(test.execPath).to.equal(process.helperExecPath);
         expect(test.sandboxed).to.be.true('sandboxed');
+        expect(test.contextIsolated).to.be.false('contextIsolated');
         expect(test.type).to.equal('renderer');
         expect(test.version).to.equal(process.version);
         expect(test.versions).to.deep.equal(process.versions);
+        expect(test.contextId).to.be.a('string');
 
         if (process.platform === 'linux' && test.osSandbox) {
           expect(test.creationTime).to.be.null('creation time');
@@ -2585,7 +2622,8 @@ describe('BrowserWindow module', () => {
           webPreferences: {
             sandbox: true,
             preload,
-            webviewTag: true
+            webviewTag: true,
+            contextIsolation: false
           }
         });
         const didAttachWebview = emittedOnce(w.webContents, 'did-attach-webview');
@@ -2608,7 +2646,8 @@ describe('BrowserWindow module', () => {
             nodeIntegration: true,
             nativeWindowOpen: true,
             // tests relies on preloads in opened windows
-            nodeIntegrationInSubFrames: true
+            nodeIntegrationInSubFrames: true,
+            contextIsolation: false
           }
         });
       });
@@ -2658,9 +2697,14 @@ describe('BrowserWindow module', () => {
             nodeIntegrationInSubFrames: true,
             nativeWindowOpen: true,
             webviewTag: true,
+            contextIsolation: false,
             preload
           }
         });
+        w.webContents.setWindowOpenHandler(() => ({
+          action: 'allow',
+          overrideBrowserWindowOptions: { show: false, webPreferences: { contextIsolation: false, webviewTag: true, nativeWindowOpen: true, nodeIntegrationInSubFrames: true } }
+        }));
         w.webContents.once('new-window', (event, url, frameName, disposition, options) => {
           options.show = false;
         });
@@ -2691,7 +2735,7 @@ describe('BrowserWindow module', () => {
           overrideBrowserWindowOptions: {
             webPreferences: {
               preload: preloadPath,
-              foo: 'bar'
+              contextIsolation: false
             }
           }
         }));
@@ -2701,7 +2745,7 @@ describe('BrowserWindow module', () => {
           emittedOnce(ipcMain, 'answer')
         ]);
         const webPreferences = childWebContents.getLastWebPreferences();
-        expect(webPreferences.foo).to.equal('bar');
+        expect(webPreferences.contextIsolation).to.equal(false);
       });
 
       describe('window.location', () => {
@@ -2730,7 +2774,8 @@ describe('BrowserWindow module', () => {
             webPreferences: {
               nativeWindowOpen: true,
               // test relies on preloads in opened window
-              nodeIntegrationInSubFrames: true
+              nodeIntegrationInSubFrames: true,
+              contextIsolation: false
             }
           });
 
@@ -2738,7 +2783,9 @@ describe('BrowserWindow module', () => {
             action: 'allow',
             overrideBrowserWindowOptions: {
               webPreferences: {
-                preload: path.join(fixtures, 'api', 'window-open-preload.js')
+                preload: path.join(fixtures, 'api', 'window-open-preload.js'),
+                contextIsolation: false,
+                nodeIntegrationInSubFrames: true
               }
             }
           }));
@@ -2917,7 +2964,8 @@ describe('BrowserWindow module', () => {
         width: 100,
         height: 100,
         webPreferences: {
-          nodeIntegration: true
+          nodeIntegration: true,
+          contextIsolation: false
         }
       });
 
@@ -2941,7 +2989,8 @@ describe('BrowserWindow module', () => {
         width: 100,
         height: 100,
         webPreferences: {
-          nodeIntegration: true
+          nodeIntegration: true,
+          contextIsolation: false
         }
       });
 
@@ -2968,7 +3017,8 @@ describe('BrowserWindow module', () => {
         width: 100,
         height: 100,
         webPreferences: {
-          nodeIntegration: true
+          nodeIntegration: true,
+          contextIsolation: false
         }
       });
 
@@ -2988,7 +3038,8 @@ describe('BrowserWindow module', () => {
         width: 100,
         height: 100,
         webPreferences: {
-          nodeIntegration: true
+          nodeIntegration: true,
+          contextIsolation: false
         }
       });
       w.loadFile(path.join(fixtures, 'pages', 'visibilitychange.html'));
@@ -3008,7 +3059,8 @@ describe('BrowserWindow module', () => {
         width: 100,
         height: 100,
         webPreferences: {
-          nodeIntegration: true
+          nodeIntegration: true,
+          contextIsolation: false
         }
       });
       w.loadFile(path.join(fixtures, 'pages', 'visibilitychange.html'));
@@ -3071,12 +3123,12 @@ describe('BrowserWindow module', () => {
 
     it('emits when window.open is called', (done) => {
       const w = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: true } });
-      w.webContents.once('new-window', (e, url, frameName, disposition, options, additionalFeatures) => {
+      w.webContents.once('new-window', (e, url, frameName, disposition, options) => {
         e.preventDefault();
         try {
           expect(url).to.equal('http://host/');
           expect(frameName).to.equal('host');
-          expect(additionalFeatures[0]).to.equal('this-is-not-a-standard-feature');
+          expect((options as any)['this-is-not-a-standard-feature']).to.equal(true);
           done();
         } catch (e) {
           done(e);
@@ -3087,12 +3139,12 @@ describe('BrowserWindow module', () => {
 
     it('emits when window.open is called with no webPreferences', (done) => {
       const w = new BrowserWindow({ show: false });
-      w.webContents.once('new-window', function (e, url, frameName, disposition, options, additionalFeatures) {
+      w.webContents.once('new-window', function (e, url, frameName, disposition, options) {
         e.preventDefault();
         try {
           expect(url).to.equal('http://host/');
           expect(frameName).to.equal('host');
-          expect(additionalFeatures[0]).to.equal('this-is-not-a-standard-feature');
+          expect((options as any)['this-is-not-a-standard-feature']).to.equal(true);
           done();
         } catch (e) {
           done(e);
@@ -3114,6 +3166,43 @@ describe('BrowserWindow module', () => {
         }
       });
       w.loadFile(path.join(fixtures, 'pages', 'target-name.html'));
+    });
+
+    it('includes all properties', async () => {
+      const w = new BrowserWindow({ show: false });
+
+      const p = new Promise<{
+        url: string,
+        frameName: string,
+        disposition: string,
+        options: BrowserWindowConstructorOptions,
+        additionalFeatures: string[],
+        referrer: Electron.Referrer,
+        postBody: Electron.PostBody
+      }>((resolve) => {
+        w.webContents.once('new-window', (e, url, frameName, disposition, options, additionalFeatures, referrer, postBody) => {
+          e.preventDefault();
+          resolve({ url, frameName, disposition, options, additionalFeatures, referrer, postBody });
+        });
+      });
+      w.loadURL(`data:text/html,${encodeURIComponent(`
+        <form target="_blank" method="POST" id="form" action="http://example.com/test">
+          <input type="text" name="post-test-key" value="post-test-value"></input>
+        </form>
+        <script>form.submit()</script>
+      `)}`);
+      const { url, frameName, disposition, options, additionalFeatures, referrer, postBody } = await p;
+      expect(url).to.equal('http://example.com/test');
+      expect(frameName).to.equal('');
+      expect(disposition).to.equal('foreground-tab');
+      expect(options).to.be.an('object').not.null();
+      expect(referrer.policy).to.equal('strict-origin-when-cross-origin');
+      expect(referrer.url).to.equal('');
+      expect(additionalFeatures).to.deep.equal([]);
+      expect(postBody.data).to.have.length(1);
+      expect(postBody.data[0].type).to.equal('rawData');
+      expect((postBody.data[0] as any).bytes).to.deep.equal(Buffer.from('post-test-key=post-test-value'));
+      expect(postBody.contentType).to.equal('application/x-www-form-urlencoded');
     });
   });
 
@@ -3412,7 +3501,7 @@ describe('BrowserWindow module', () => {
         const w = new BrowserWindow({ show: false });
         const c = new BrowserWindow({ show: false, parent: w });
         expect(c.isVisible()).to.be.false('child is visible');
-        expect(c.getParentWindow().isVisible()).to.be.false('parent is visible');
+        expect(c.getParentWindow()!.isVisible()).to.be.false('parent is visible');
       });
     });
 
@@ -3612,6 +3701,18 @@ describe('BrowserWindow module', () => {
           const w = new BrowserWindow({ show: false, thickFrame: false });
           expect(w.resizable).to.be.false('resizable');
         }
+      });
+
+      // On Linux there is no "resizable" property of a window.
+      ifit(process.platform !== 'linux')('does affect maximizability when disabled and enabled', () => {
+        const w = new BrowserWindow({ show: false });
+        expect(w.resizable).to.be.true('resizable');
+
+        expect(w.maximizable).to.be.true('maximizable');
+        w.resizable = false;
+        expect(w.maximizable).to.be.false('not maximizable');
+        w.resizable = true;
+        expect(w.maximizable).to.be.true('maximizable');
       });
 
       ifit(process.platform === 'win32')('works for a window smaller than 64x64', () => {
@@ -4072,8 +4173,6 @@ describe('BrowserWindow module', () => {
         const leaveFullScreen = emittedOnce(w, 'leave-full-screen');
         w.setFullScreen(false);
         await leaveFullScreen;
-
-        w.close();
       });
 
       it('can be changed with setFullScreen method', async () => {
@@ -4088,6 +4187,42 @@ describe('BrowserWindow module', () => {
         w.setFullScreen(false);
         await leaveFullScreen;
         expect(w.isFullScreen()).to.be.false('isFullScreen');
+      });
+
+      it('handles several transitions starting with fullscreen', async () => {
+        const w = new BrowserWindow({ fullscreen: true, show: true });
+
+        expect(w.isFullScreen()).to.be.true('not fullscreen');
+
+        w.setFullScreen(false);
+        w.setFullScreen(true);
+
+        const enterFullScreen = emittedNTimes(w, 'enter-full-screen', 2);
+        await enterFullScreen;
+
+        expect(w.isFullScreen()).to.be.true('not fullscreen');
+
+        await delay();
+        const leaveFullScreen = emittedOnce(w, 'leave-full-screen');
+        w.setFullScreen(false);
+        await leaveFullScreen;
+
+        expect(w.isFullScreen()).to.be.false('is fullscreen');
+      });
+
+      it('handles several transitions in close proximity', async () => {
+        const w = new BrowserWindow();
+
+        expect(w.isFullScreen()).to.be.false('is fullscreen');
+
+        w.setFullScreen(true);
+        w.setFullScreen(false);
+        w.setFullScreen(true);
+
+        const enterFullScreen = emittedNTimes(w, 'enter-full-screen', 2);
+        await enterFullScreen;
+
+        expect(w.isFullScreen()).to.be.true('not fullscreen');
       });
 
       it('does not crash when exiting simpleFullScreen (properties)', async () => {
@@ -4123,6 +4258,21 @@ describe('BrowserWindow module', () => {
         w.setFullScreen(false);
         await leaveFullScreen;
         expect(w.isFullScreen()).to.be.false('isFullScreen');
+      });
+
+      // FIXME: https://github.com/electron/electron/issues/30140
+      xit('multiple windows inherit correct fullscreen state', async () => {
+        const w = new BrowserWindow();
+        const enterFullScreen = emittedOnce(w, 'enter-full-screen');
+        w.setFullScreen(true);
+        await enterFullScreen;
+        expect(w.isFullScreen()).to.be.true('isFullScreen');
+        await delay();
+        const w2 = new BrowserWindow({ show: false });
+        const enterFullScreen2 = emittedOnce(w2, 'enter-full-screen');
+        w2.show();
+        await enterFullScreen2;
+        expect(w2.isFullScreen()).to.be.true('isFullScreen');
       });
     });
 
@@ -4374,30 +4524,42 @@ describe('BrowserWindow module', () => {
       const [, data] = await p;
       expect(data.pageContext.openedLocation).to.equal('about:blank');
     });
-  });
-
-  describe('reloading with allowRendererProcessReuse enabled', () => {
-    it('does not cause Node.js module API hangs after reload', (done) => {
-      const w = new BrowserWindow({
+    it('reports process.contextIsolated', async () => {
+      const iw = new BrowserWindow({
         show: false,
         webPreferences: {
-          nodeIntegration: true
+          contextIsolation: true,
+          preload: path.join(fixtures, 'api', 'isolated-process.js')
         }
       });
-
-      let count = 0;
-      ipcMain.on('async-node-api-done', () => {
-        if (count === 3) {
-          ipcMain.removeAllListeners('async-node-api-done');
-          done();
-        } else {
-          count++;
-          w.reload();
-        }
-      });
-
-      w.loadFile(path.join(fixtures, 'pages', 'send-after-node.html'));
+      const p = emittedOnce(ipcMain, 'context-isolation');
+      iw.loadURL('about:blank');
+      const [, contextIsolation] = await p;
+      expect(contextIsolation).to.be.true('contextIsolation');
     });
+  });
+
+  it('reloading does not cause Node.js module API hangs after reload', (done) => {
+    const w = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false
+      }
+    });
+
+    let count = 0;
+    ipcMain.on('async-node-api-done', () => {
+      if (count === 3) {
+        ipcMain.removeAllListeners('async-node-api-done');
+        done();
+      } else {
+        count++;
+        w.reload();
+      }
+    });
+
+    w.loadFile(path.join(fixtures, 'pages', 'send-after-node.html'));
   });
 
   describe('window.webContents.focus()', () => {
@@ -4407,9 +4569,9 @@ describe('BrowserWindow module', () => {
       w1.loadURL('about:blank');
       const w2 = new BrowserWindow({ x: 300, y: 300, width: 300, height: 200 });
       w2.loadURL('about:blank');
+      const w1Focused = emittedOnce(w1, 'focus');
       w1.webContents.focus();
-      // Give focus some time to switch to w1
-      await delay();
+      await w1Focused;
       expect(w1.webContents.isFocused()).to.be.true('focuses window');
     });
   });
@@ -4527,6 +4689,34 @@ describe('BrowserWindow module', () => {
         await emittedOnce(w.webContents, 'paint');
         expect(w.webContents.frameRate).to.equal(30);
       });
+    });
+  });
+
+  describe('"transparent" option', () => {
+    afterEach(closeAllWindows);
+
+    // Only applicable on Windows where transparent windows can't be maximized.
+    ifit(process.platform === 'win32')('can show maximized frameless window', async () => {
+      const display = screen.getPrimaryDisplay();
+
+      const w = new BrowserWindow({
+        ...display.bounds,
+        frame: false,
+        transparent: true,
+        show: true
+      });
+
+      w.loadURL('about:blank');
+      await emittedOnce(w, 'ready-to-show');
+
+      expect(w.isMaximized()).to.be.true();
+
+      // Fails when the transparent HWND is in an invalid maximized state.
+      expect(w.getBounds()).to.deep.equal(display.workArea);
+
+      const newBounds = { width: 256, height: 256, x: 0, y: 0 };
+      w.setBounds(newBounds);
+      expect(w.getBounds()).to.deep.equal(newBounds);
     });
   });
 });

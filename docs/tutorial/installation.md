@@ -1,4 +1,4 @@
-# Installation
+# Advanced Installation Instructions
 
 To install prebuilt Electron binaries, use [`npm`][npm].
 The preferred method is to install Electron as a development dependency in your
@@ -11,13 +11,18 @@ npm install electron --save-dev
 See the [Electron versioning doc][versioning] for info on how to
 manage Electron versions in your apps.
 
-## Global Installation
+## Running Electron ad-hoc
 
-You can also install the `electron` command globally in your `$PATH`:
+If you're in a pinch and would prefer to not use `npm install` in your local
+project, you can also run Electron ad-hoc using the [`npx`][npx] command runner
+bundled with `npm`:
 
 ```sh
-npm install electron -g
+npx electron .
 ```
+
+The above command will run the current working directory with Electron. Note that
+any dependencies in your app will not be installed.
 
 ## Customization
 
@@ -68,7 +73,7 @@ url = ELECTRON_MIRROR + ELECTRON_CUSTOM_DIR + '/' + ELECTRON_CUSTOM_FILENAME
 For instance, to use the China CDN mirror:
 
 ```shell
-ELECTRON_MIRROR="https://cdn.npm.taobao.org/dist/electron/"
+ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
 ```
 
 By default, `ELECTRON_CUSTOM_DIR` is set to `v$VERSION`. To change the format,
@@ -78,12 +83,17 @@ resolves to `version-5.0.0`, `{{ version }}` resolves to `5.0.0`, and
 use the China non-CDN mirror:
 
 ```shell
-ELECTRON_MIRROR="https://npm.taobao.org/mirrors/electron/"
+ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
 ELECTRON_CUSTOM_DIR="{{ version }}"
 ```
 
 The above configuration will download from URLs such as
-`https://npm.taobao.org/mirrors/electron/8.0.0/electron-v8.0.0-linux-x64.zip`.
+`https://npmmirror.com/mirrors/electron/8.0.0/electron-v8.0.0-linux-x64.zip`.
+
+If your mirror serves artifacts with different checksums to the official
+Electron release you may have to set `ELECTRON_USE_REMOTE_CHECKSUMS=1` to
+force Electron to use the remote `SHASUMS256.txt` file to verify the checksum
+instead of the embedded checksums.
 
 #### Cache
 
@@ -102,42 +112,28 @@ cache also in `~/.electron`.
 You can also override the local cache location by providing a `electron_config_cache`
 environment variable.
 
-The cache contains the version's official zip file as well as a checksum, stored as
-a text file. A typical cache might look like this:
+The cache contains the version's official zip file as well as a checksum, and is stored as
+`[checksum]/[filename]`. A typical cache might look like this:
 
 ```sh
-├── httpsgithub.comelectronelectronreleasesdownloadv1.7.9electron-v1.7.9-darwin-x64.zip
-│   └── electron-v1.7.9-darwin-x64.zip
-├── httpsgithub.comelectronelectronreleasesdownloadv1.7.9SHASUMS256.txt
-│   └── SHASUMS256.txt
-├── httpsgithub.comelectronelectronreleasesdownloadv1.8.1electron-v1.8.1-darwin-x64.zip
-│   └── electron-v1.8.1-darwin-x64.zip
-├── httpsgithub.comelectronelectronreleasesdownloadv1.8.1SHASUMS256.txt
-│   └── SHASUMS256.txt
-├── httpsgithub.comelectronelectronreleasesdownloadv1.8.2-beta.1electron-v1.8.2-beta.1-darwin-x64.zip
-│   └── electron-v1.8.2-beta.1-darwin-x64.zip
-├── httpsgithub.comelectronelectronreleasesdownloadv1.8.2-beta.1SHASUMS256.txt
-│   └── SHASUMS256.txt
-├── httpsgithub.comelectronelectronreleasesdownloadv1.8.2-beta.2electron-v1.8.2-beta.2-darwin-x64.zip
-│   └── electron-v1.8.2-beta.2-darwin-x64.zip
-├── httpsgithub.comelectronelectronreleasesdownloadv1.8.2-beta.2SHASUMS256.txt
-│   └── SHASUMS256.txt
-├── httpsgithub.comelectronelectronreleasesdownloadv1.8.2-beta.3electron-v1.8.2-beta.3-darwin-x64.zip
-│   └── electron-v1.8.2-beta.3-darwin-x64.zip
-└── httpsgithub.comelectronelectronreleasesdownloadv1.8.2-beta.3SHASUMS256.txt
-    └── SHASUMS256.txt
+├── a91b089b5dc5b1279966511344b805ec84869b6cd60af44f800b363bba25b915
+│   └── electron-v15.3.1-darwin-x64.zip
 ```
 
 ## Skip binary download
 
-When installing the `electron` NPM package, it automatically downloads the electron binary.
+Under the hood, Electron's JavaScript API binds to a binary that contains its
+implementations. Because this binary is crucial to the function of any Electron app,
+it is downloaded by default in the `postinstall` step every time you install `electron`
+from the npm registry.
 
-This can sometimes be unnecessary, e.g. in a CI environment, when testing another component.
+However, if you want to install your project's dependencies but don't need to use
+Electron functionality, you can set the `ELECTRON_SKIP_BINARY_DOWNLOAD` environment
+variable to prevent the binary from being downloaded. For instance, this feature can
+be useful in continuous integration environments when running unit tests that mock
+out the `electron` module.
 
-To prevent the binary from being downloaded when you install all npm dependencies you can set the environment variable `ELECTRON_SKIP_BINARY_DOWNLOAD`.
-E.g.:
-
-```sh
+```sh npm2yarn
 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
 ```
 
@@ -178,6 +174,7 @@ If you need to force a re-download of the asset and the SHASUM file set the
 
 [npm]: https://docs.npmjs.com
 [versioning]: ./electron-versioning.md
+[npx]: https://docs.npmjs.com/cli/v7/commands/npx
 [releases]: https://github.com/electron/electron/releases
 [proxy-env-10]: https://github.com/gajus/global-agent/blob/v2.1.5/README.md#environment-variables
 [proxy-env]: https://github.com/np-maintain/global-tunnel/blob/v2.7.1/README.md#auto-config

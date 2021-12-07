@@ -1,6 +1,8 @@
 # Build Instructions
 
-Follow the guidelines below for building Electron.
+Follow the guidelines below for building **Electron itself**, for the purposes of creating custom Electron binaries. For bundling and distributing your app code with the prebuilt Electron binaries, see the [application distribution][application-distribution] guide.
+
+[application-distribution]: ../tutorial/application-distribution.md
 
 ## Platform prerequisites
 
@@ -13,6 +15,19 @@ Check the build prerequisites for your platform before proceeding
 ## Build Tools
 
 [Electron's Build Tools](https://github.com/electron/build-tools) automate much of the setup for compiling Electron from source with different configurations and build targets. If you wish to set up the environment manually, the instructions are listed below.
+
+Electron uses [GN](https://gn.googlesource.com/gn) for project generation and
+[ninja](https://ninja-build.org/) for building. Project configurations can
+be found in the `.gn` and `.gni` files.
+
+## GN Files
+
+The following `gn` files contain the main rules for building Electron:
+
+* `BUILD.gn` defines how Electron itself is built and
+  includes the default configurations for linking with Chromium.
+* `build/args/{testing,release,all}.gn` contain the default build arguments for
+  building Electron.
 
 ## GN prerequisites
 
@@ -63,8 +78,8 @@ origin URLs.
 $ cd src/electron
 $ git remote remove origin
 $ git remote add origin https://github.com/electron/electron
-$ git checkout master
-$ git branch --set-upstream-to=origin/master
+$ git checkout main
+$ git branch --set-upstream-to=origin/main
 $ cd -
 ```
 

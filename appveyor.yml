@@ -36,6 +36,7 @@ environment:
   ELECTRON_ENABLE_STACK_DUMPING: 1
   MOCHA_REPORTER: mocha-multi-reporters
   MOCHA_MULTI_REPORTERS: mocha-appveyor-reporter, tap
+  GOMA_FALLBACK_ON_AUTH_FAILURE: true
 notifications:
   - provider: Webhook
     url: https://electron-mission-control.herokuapp.com/rest/appveyor-hook
@@ -111,7 +112,7 @@ build_script:
           }
         }
       }
-  - if "%RUN_GCLIENT_SYNC%"=="true" ( gclient sync --with_branch_heads --with_tags --ignore_locks)
+  - if "%RUN_GCLIENT_SYNC%"=="true" ( gclient sync )
   - ps: >-
       if ($env:SAVE_GCLIENT_SRC -eq 'true') {
         # archive current source for future use 

@@ -2,8 +2,8 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_BROWSER_API_ELECTRON_API_MENU_VIEWS_H_
-#define SHELL_BROWSER_API_ELECTRON_API_MENU_VIEWS_H_
+#ifndef ELECTRON_SHELL_BROWSER_API_ELECTRON_API_MENU_VIEWS_H_
+#define ELECTRON_SHELL_BROWSER_API_ELECTRON_API_MENU_VIEWS_H_
 
 #include <map>
 #include <memory>
@@ -36,13 +36,11 @@ class MenuViews : public Menu {
   // window ID -> open context menu
   std::map<int32_t, std::unique_ptr<views::MenuRunner>> menu_runners_;
 
-  base::WeakPtrFactory<MenuViews> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(MenuViews);
+  base::WeakPtrFactory<MenuViews> weak_factory_{this};
 };
 
 }  // namespace api
 
 }  // namespace electron
 
-#endif  // SHELL_BROWSER_API_ELECTRON_API_MENU_VIEWS_H_
+#endif  // ELECTRON_SHELL_BROWSER_API_ELECTRON_API_MENU_VIEWS_H_

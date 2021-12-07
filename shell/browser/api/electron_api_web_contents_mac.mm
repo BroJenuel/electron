@@ -6,6 +6,7 @@
 #include "shell/browser/api/electron_api_web_contents.h"
 #include "shell/browser/ui/cocoa/event_dispatching_window.h"
 #include "shell/browser/web_contents_preferences.h"
+#include "ui/base/cocoa/command_dispatcher.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
 #import <Cocoa/Cocoa.h>
@@ -49,8 +50,7 @@ bool WebContents::PlatformHandleKeyboardEvent(
 
   // Check if the webContents has preferences and to ignore shortcuts
   auto* web_preferences = WebContentsPreferences::From(source);
-  if (web_preferences &&
-      web_preferences->IsEnabled("ignoreMenuShortcuts", false))
+  if (web_preferences && web_preferences->ShouldIgnoreMenuShortcuts())
     return false;
 
   // Send the event to the menu before sending it to the window
@@ -58,12 +58,23 @@ bool WebContents::PlatformHandleKeyboardEvent(
       [[NSApp mainMenu] performKeyEquivalent:event.os_event])
     return true;
 
+  // Let the window redispatch the OS event
   if (event.os_event.window &&
       [event.os_event.window isKindOfClass:[EventDispatchingWindow class]]) {
     [event.os_event.window redispatchKeyEvent:event.os_event];
     // FIXME(nornagon): this isn't the right return value; we should implement
     // devtools windows as Widgets in order to take advantage of the
     // pre-existing redispatch code in bridged_native_widget.
+    return false;
+  } else if (event.os_event.window &&
+             [event.os_event.window
+                 conformsToProtocol:@protocol(CommandDispatchingWindow)]) {
+    NSObject<CommandDispatchingWindow>* window =
+        static_cast<NSObject<CommandDispatchingWindow>*>(event.os_event.window);
+    [[window commandDispatcher] redispatchKeyEvent:event.os_event];
+    // FIXME(clavin): Not exactly sure what to return here, likely the same
+    // situation as the branch above. If a future refactor removes
+    // |EventDispatchingWindow| then only this branch will need to remain.
     return false;
   }
 

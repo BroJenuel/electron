@@ -8,25 +8,35 @@
 #include <utility>
 #include <vector>
 
+#include "base/values.h"
 #include "content/public/browser/child_process_security_policy.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/permission_controller.h"
 #include "content/public/browser/permission_type.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "gin/data_object_builder.h"
+#include "shell/browser/api/electron_api_web_contents.h"
 #include "shell/browser/electron_browser_client.h"
 #include "shell/browser/electron_browser_main_parts.h"
+#include "shell/browser/hid/hid_chooser_context.h"
+#include "shell/browser/serial/serial_chooser_context.h"
+#include "shell/browser/web_contents_permission_helper.h"
 #include "shell/browser/web_contents_preferences.h"
+#include "shell/common/gin_converters/content_converter.h"
+#include "shell/common/gin_converters/frame_converter.h"
+#include "shell/common/gin_converters/value_converter.h"
+#include "shell/common/gin_helper/event_emitter_caller.h"
 
 namespace electron {
 
 namespace {
 
-bool WebContentsDestroyed(int process_id) {
+bool WebContentsDestroyed(content::RenderFrameHost* rfh) {
   content::WebContents* web_contents =
-      static_cast<ElectronBrowserClient*>(ElectronBrowserClient::Get())
-          ->GetWebContentsFromProcessID(process_id);
+      content::WebContents::FromRenderFrameHost(rfh);
   if (!web_contents)
     return true;
   return web_contents->IsBeingDestroyed();
@@ -46,6 +56,7 @@ class ElectronPermissionManager::PendingRequest {
                  const std::vector<content::PermissionType>& permissions,
                  StatusesCallback callback)
       : render_process_id_(render_frame_host->GetProcess()->GetID()),
+        render_frame_id_(render_frame_host->GetGlobalId()),
         callback_(std::move(callback)),
         permissions_(permissions),
         results_(permissions.size(), blink::mojom::PermissionStatus::DENIED),
@@ -71,7 +82,9 @@ class ElectronPermissionManager::PendingRequest {
     --remaining_results_;
   }
 
-  int render_process_id() const { return render_process_id_; }
+  content::RenderFrameHost* GetRenderFrameHost() {
+    return content::RenderFrameHost::FromID(render_frame_id_);
+  }
 
   bool IsComplete() const { return remaining_results_ == 0; }
 
@@ -83,6 +96,7 @@ class ElectronPermissionManager::PendingRequest {
 
  private:
   int render_process_id_;
+  content::GlobalRenderFrameHostId render_frame_id_;
   StatusesCallback callback_;
   std::vector<content::PermissionType> permissions_;
   std::vector<blink::mojom::PermissionStatus> results_;
@@ -99,7 +113,7 @@ void ElectronPermissionManager::SetPermissionRequestHandler(
     for (PendingRequestsMap::iterator iter(&pending_requests_); !iter.IsAtEnd();
          iter.Advance()) {
       auto* request = iter.GetCurrentValue();
-      if (!WebContentsDestroyed(request->render_process_id()))
+      if (!WebContentsDestroyed(request->GetRenderFrameHost()))
         request->RunCallback();
     }
     pending_requests_.Clear();
@@ -112,43 +126,48 @@ void ElectronPermissionManager::SetPermissionCheckHandler(
   check_handler_ = handler;
 }
 
-int ElectronPermissionManager::RequestPermission(
+void ElectronPermissionManager::SetDevicePermissionHandler(
+    const DeviceCheckHandler& handler) {
+  device_permission_handler_ = handler;
+}
+
+void ElectronPermissionManager::RequestPermission(
     content::PermissionType permission,
     content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
     bool user_gesture,
     StatusCallback response_callback) {
-  return RequestPermissionWithDetails(permission, render_frame_host,
-                                      requesting_origin, user_gesture, nullptr,
-                                      std::move(response_callback));
+  RequestPermissionWithDetails(permission, render_frame_host, requesting_origin,
+                               user_gesture, nullptr,
+                               std::move(response_callback));
 }
 
-int ElectronPermissionManager::RequestPermissionWithDetails(
+void ElectronPermissionManager::RequestPermissionWithDetails(
     content::PermissionType permission,
     content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
     bool user_gesture,
     const base::DictionaryValue* details,
     StatusCallback response_callback) {
-  return RequestPermissionsWithDetails(
+  RequestPermissionsWithDetails(
       std::vector<content::PermissionType>(1, permission), render_frame_host,
       requesting_origin, user_gesture, details,
       base::BindOnce(PermissionRequestResponseCallbackWrapper,
                      std::move(response_callback)));
 }
 
-int ElectronPermissionManager::RequestPermissions(
+void ElectronPermissionManager::RequestPermissions(
     const std::vector<content::PermissionType>& permissions,
     content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
     bool user_gesture,
     StatusesCallback response_callback) {
-  return RequestPermissionsWithDetails(permissions, render_frame_host,
-                                       requesting_origin, user_gesture, nullptr,
-                                       std::move(response_callback));
+  RequestPermissionsWithDetails(permissions, render_frame_host,
+                                requesting_origin, user_gesture, nullptr,
+                                std::move(response_callback));
 }
 
-int ElectronPermissionManager::RequestPermissionsWithDetails(
+void ElectronPermissionManager::RequestPermissionsWithDetails(
     const std::vector<content::PermissionType>& permissions,
     content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
@@ -157,7 +176,7 @@ int ElectronPermissionManager::RequestPermissionsWithDetails(
     StatusesCallback response_callback) {
   if (permissions.empty()) {
     std::move(response_callback).Run({});
-    return content::PermissionController::kNoPendingOperation;
+    return;
   }
 
   if (request_handler_.is_null()) {
@@ -175,7 +194,7 @@ int ElectronPermissionManager::RequestPermissionsWithDetails(
       statuses.push_back(blink::mojom::PermissionStatus::GRANTED);
     }
     std::move(response_callback).Run(statuses);
-    return content::PermissionController::kNoPendingOperation;
+    return;
   }
 
   auto* web_contents =
@@ -196,8 +215,6 @@ int ElectronPermissionManager::RequestPermissionsWithDetails(
                                render_frame_host->GetParent() == nullptr);
     request_handler_.Run(web_contents, permission, callback, mutable_details);
   }
-
-  return request_id;
 }
 
 void ElectronPermissionManager::OnPermissionResponse(
@@ -232,16 +249,17 @@ blink::mojom::PermissionStatus ElectronPermissionManager::GetPermissionStatus(
                  : blink::mojom::PermissionStatus::DENIED;
 }
 
-int ElectronPermissionManager::SubscribePermissionStatusChange(
+ElectronPermissionManager::SubscriptionId
+ElectronPermissionManager::SubscribePermissionStatusChange(
     content::PermissionType permission,
     content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
     base::RepeatingCallback<void(blink::mojom::PermissionStatus)> callback) {
-  return -1;
+  return SubscriptionId(-1);
 }
 
 void ElectronPermissionManager::UnsubscribePermissionStatusChange(
-    int subscription_id) {}
+    SubscriptionId id) {}
 
 bool ElectronPermissionManager::CheckPermissionWithDetails(
     content::PermissionType permission,
@@ -276,6 +294,96 @@ bool ElectronPermissionManager::CheckPermissionWithDetails(
   }
   return check_handler_.Run(web_contents, permission, requesting_origin,
                             mutable_details);
+}
+
+bool ElectronPermissionManager::CheckDevicePermission(
+    content::PermissionType permission,
+    const url::Origin& origin,
+    const base::Value* device,
+    content::RenderFrameHost* render_frame_host) const {
+  auto* web_contents =
+      content::WebContents::FromRenderFrameHost(render_frame_host);
+  api::WebContents* api_web_contents = api::WebContents::From(web_contents);
+  if (device_permission_handler_.is_null()) {
+    if (api_web_contents) {
+      std::vector<base::Value> granted_devices =
+          api_web_contents->GetGrantedDevices(origin, permission,
+                                              render_frame_host);
+
+      for (const auto& granted_device : granted_devices) {
+        if (permission ==
+            static_cast<content::PermissionType>(
+                WebContentsPermissionHelper::PermissionType::HID)) {
+          if (device->FindIntKey(kHidVendorIdKey) !=
+                  granted_device.FindIntKey(kHidVendorIdKey) ||
+              device->FindIntKey(kHidProductIdKey) !=
+                  granted_device.FindIntKey(kHidProductIdKey)) {
+            continue;
+          }
+
+          const auto* serial_number =
+              granted_device.FindStringKey(kHidSerialNumberKey);
+          const auto* device_serial_number =
+              device->FindStringKey(kHidSerialNumberKey);
+
+          if (serial_number && device_serial_number &&
+              *device_serial_number == *serial_number)
+            return true;
+        } else if (permission ==
+                   static_cast<content::PermissionType>(
+                       WebContentsPermissionHelper::PermissionType::SERIAL)) {
+#if defined(OS_WIN)
+          if (device->FindStringKey(kDeviceInstanceIdKey) ==
+              granted_device.FindStringKey(kDeviceInstanceIdKey))
+            return true;
+#else
+          if (device->FindIntKey(kVendorIdKey) !=
+                  granted_device.FindIntKey(kVendorIdKey) ||
+              device->FindIntKey(kProductIdKey) !=
+                  granted_device.FindIntKey(kProductIdKey) ||
+              *device->FindStringKey(kSerialNumberKey) !=
+                  *granted_device.FindStringKey(kSerialNumberKey)) {
+            continue;
+          }
+
+#if defined(OS_MAC)
+          if (*device->FindStringKey(kUsbDriverKey) !=
+              *granted_device.FindStringKey(kUsbDriverKey)) {
+            continue;
+          }
+#endif  // defined(OS_MAC)
+          return true;
+#endif  // defined(OS_WIN)
+        }
+      }
+    }
+    return false;
+  } else {
+    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+    v8::HandleScope scope(isolate);
+    v8::Local<v8::Object> details = gin::DataObjectBuilder(isolate)
+                                        .Set("deviceType", permission)
+                                        .Set("origin", origin.Serialize())
+                                        .Set("device", device->Clone())
+                                        .Set("frame", render_frame_host)
+                                        .Build();
+    return device_permission_handler_.Run(details);
+  }
+}
+
+void ElectronPermissionManager::GrantDevicePermission(
+    content::PermissionType permission,
+    const url::Origin& origin,
+    const base::Value* device,
+    content::RenderFrameHost* render_frame_host) const {
+  if (device_permission_handler_.is_null()) {
+    auto* web_contents =
+        content::WebContents::FromRenderFrameHost(render_frame_host);
+    api::WebContents* api_web_contents = api::WebContents::From(web_contents);
+    if (api_web_contents)
+      api_web_contents->GrantDevicePermission(origin, device, permission,
+                                              render_frame_host);
+  }
 }
 
 blink::mojom::PermissionStatus

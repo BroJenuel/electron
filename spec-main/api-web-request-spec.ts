@@ -18,7 +18,7 @@ describe('webRequest module', () => {
       res.setHeader('Location', 'http://' + req.rawHeaders[1]);
       res.end();
     } else if (req.url === '/contentDisposition') {
-      res.setHeader('content-disposition', [' attachement; filename=aa%E4%B8%ADaa.txt']);
+      res.setHeader('content-disposition', [' attachment; filename=aa%E4%B8%ADaa.txt']);
       const content = req.url;
       res.end(content);
     } else {
@@ -90,6 +90,9 @@ describe('webRequest module', () => {
         expect(details.id).to.be.a('number');
         expect(details.timestamp).to.be.a('number');
         expect(details.webContentsId).to.be.a('number');
+        expect(details.webContents).to.be.an('object');
+        expect(details.webContents!.id).to.equal(details.webContentsId);
+        expect(details.frame).to.be.an('object');
         expect(details.url).to.be.a('string').that.is.equal(defaultURL);
         expect(details.method).to.be.a('string').that.is.equal('GET');
         expect(details.resourceType).to.be.a('string').that.is.equal('xhr');
@@ -178,6 +181,42 @@ describe('webRequest module', () => {
       expect(data).to.equal('/header/received');
     });
 
+    it('can change the request headers on a custom protocol redirect', async () => {
+      protocol.registerStringProtocol('custom-scheme', (req, callback) => {
+        if (req.url === 'custom-scheme://fake-host/redirect') {
+          callback({
+            statusCode: 302,
+            headers: {
+              Location: 'custom-scheme://fake-host'
+            }
+          });
+        } else {
+          let content = '';
+          if (req.headers.Accept === '*/*;test/header') {
+            content = 'header-received';
+          }
+          callback(content);
+        }
+      });
+
+      // Note that we need to do navigation every time after a protocol is
+      // registered or unregistered, otherwise the new protocol won't be
+      // recognized by current page when NetworkService is used.
+      await contents.loadFile(path.join(__dirname, 'fixtures', 'pages', 'jquery.html'));
+
+      try {
+        ses.webRequest.onBeforeSendHeaders((details, callback) => {
+          const requestHeaders = details.requestHeaders;
+          requestHeaders.Accept = '*/*;test/header';
+          callback({ requestHeaders: requestHeaders });
+        });
+        const { data } = await ajax('custom-scheme://fake-host/redirect');
+        expect(data).to.equal('header-received');
+      } finally {
+        protocol.unregisterProtocol('custom-scheme');
+      }
+    });
+
     it('can change request origin', async () => {
       ses.webRequest.onBeforeSendHeaders((details, callback) => {
         const requestHeaders = details.requestHeaders;
@@ -207,6 +246,18 @@ describe('webRequest module', () => {
       });
       ses.webRequest.onSendHeaders((details) => {
         expect(details.requestHeaders).to.deep.equal(requestHeaders);
+      });
+      await ajax(defaultURL);
+    });
+
+    it('leaves headers unchanged when no requestHeaders in callback', async () => {
+      let originalRequestHeaders: Record<string, string>;
+      ses.webRequest.onBeforeSendHeaders((details, callback) => {
+        originalRequestHeaders = details.requestHeaders;
+        callback({});
+      });
+      ses.webRequest.onSendHeaders((details) => {
+        expect(details.requestHeaders).to.deep.equal(originalRequestHeaders);
       });
       await ajax(defaultURL);
     });
@@ -303,11 +354,11 @@ describe('webRequest module', () => {
 
     it('does not change content-disposition header by default', async () => {
       ses.webRequest.onHeadersReceived((details, callback) => {
-        expect(details.responseHeaders!['content-disposition']).to.deep.equal([' attachement; filename=aa中aa.txt']);
+        expect(details.responseHeaders!['content-disposition']).to.deep.equal([' attachment; filename="aa中aa.txt"']);
         callback({});
       });
       const { data, headers } = await ajax(defaultURL + 'contentDisposition');
-      expect(headers).to.match(/^content-disposition: attachement; filename=aa%E4%B8%ADaa.txt$/m);
+      expect(headers).to.match(/^content-disposition: attachment; filename=aa%E4%B8%ADaa.txt$/m);
       expect(data).to.equal('/contentDisposition');
     });
 
@@ -449,7 +500,7 @@ describe('webRequest module', () => {
       });
 
       // Start server.
-      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+      await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
       const port = String((server.address() as AddressInfo).port);
 
       // Use a separate session for testing.
@@ -492,7 +543,8 @@ describe('webRequest module', () => {
       const contents = (webContents as any).create({
         session: ses,
         nodeIntegration: true,
-        webSecurity: false
+        webSecurity: false,
+        contextIsolation: false
       });
 
       // Cleanup.

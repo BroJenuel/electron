@@ -6,8 +6,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_BROWSER_UI_GTK_STATUS_ICON_H_
-#define SHELL_BROWSER_UI_GTK_STATUS_ICON_H_
+#ifndef ELECTRON_SHELL_BROWSER_UI_GTK_STATUS_ICON_H_
+#define ELECTRON_SHELL_BROWSER_UI_GTK_STATUS_ICON_H_
 
 #include <memory>
 
@@ -22,11 +22,11 @@ namespace gtkui {
 bool IsStatusIconSupported();
 std::unique_ptr<views::StatusIconLinux> CreateLinuxStatusIcon(
     const gfx::ImageSkia& image,
-    const base::string16& tool_tip,
+    const std::u16string& tool_tip,
     const char* id_prefix);
 
 }  // namespace gtkui
 
 }  // namespace electron
 
-#endif  // SHELL_BROWSER_UI_GTK_STATUS_ICON_H_
+#endif  // ELECTRON_SHELL_BROWSER_UI_GTK_STATUS_ICON_H_

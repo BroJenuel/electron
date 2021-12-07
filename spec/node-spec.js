@@ -303,6 +303,35 @@ describe('node feature', () => {
         expect(cipherText).to.equal(result);
       }
     });
+
+    it('does not crash when using crypto.diffieHellman() constructors', () => {
+      const crypto = require('crypto');
+
+      crypto.createDiffieHellman('abc');
+      crypto.createDiffieHellman('abc', 2);
+
+      // Needed to test specific DiffieHellman ctors.
+
+      // eslint-disable-next-line no-octal
+      crypto.createDiffieHellman('abc', Buffer.from([02]));
+      // eslint-disable-next-line no-octal
+      crypto.createDiffieHellman('abc', '123');
+    });
+
+    it('does not crash when calling crypto.createPrivateKey() with an unsupported algorithm', () => {
+      const crypto = require('crypto');
+
+      const ed448 = {
+        crv: 'Ed448',
+        x: 'KYWcaDwgH77xdAwcbzOgvCVcGMy9I6prRQBhQTTdKXUcr-VquTz7Fd5adJO0wT2VHysF3bk3kBoA',
+        d: 'UhC3-vN5vp_g9PnTknXZgfXUez7Xvw-OfuJ0pYkuwzpYkcTvacqoFkV_O05WMHpyXkzH9q2wzx5n',
+        kty: 'OKP'
+      };
+
+      expect(() => {
+        crypto.createPrivateKey({ key: ed448, format: 'jwk' });
+      }).to.throw(/Invalid JWK data/);
+    });
   });
 
   describe('process.stdout', () => {

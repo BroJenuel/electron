@@ -1,17 +1,14 @@
 import { IPC_MESSAGES } from '@electron/internal/common/ipc-messages';
 
+import type * as ipcRendererUtilsModule from '@electron/internal/renderer/ipc-renderer-internal-utils';
+
 const clipboard = process._linkedBinding('electron_common_clipboard');
 
 if (process.type === 'renderer') {
-  const ipcRendererUtils = require('@electron/internal/renderer/ipc-renderer-internal-utils');
-  const typeUtils = require('@electron/internal/common/type-utils');
+  const ipcRendererUtils = require('@electron/internal/renderer/ipc-renderer-internal-utils') as typeof ipcRendererUtilsModule;
 
-  const makeRemoteMethod = function (method: keyof Electron.Clipboard) {
-    return (...args: any[]) => {
-      args = typeUtils.serialize(args);
-      const result = ipcRendererUtils.invokeSync(IPC_MESSAGES.BROWSER_CLIPBOARD_SYNC, method, ...args);
-      return typeUtils.deserialize(result);
-    };
+  const makeRemoteMethod = function (method: keyof Electron.Clipboard): any {
+    return (...args: any[]) => ipcRendererUtils.invokeSync(IPC_MESSAGES.BROWSER_CLIPBOARD_SYNC, method, ...args);
   };
 
   if (process.platform === 'linux') {

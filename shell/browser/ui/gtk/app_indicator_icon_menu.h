@@ -2,11 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_BROWSER_UI_GTK_APP_INDICATOR_ICON_MENU_H_
-#define SHELL_BROWSER_UI_GTK_APP_INDICATOR_ICON_MENU_H_
+#ifndef ELECTRON_SHELL_BROWSER_UI_GTK_APP_INDICATOR_ICON_MENU_H_
+#define ELECTRON_SHELL_BROWSER_UI_GTK_APP_INDICATOR_ICON_MENU_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "ui/base/glib/glib_signal.h"
 
 typedef struct _GtkMenu GtkMenu;
@@ -26,11 +25,16 @@ class AppIndicatorIconMenu {
   explicit AppIndicatorIconMenu(ui::MenuModel* model);
   virtual ~AppIndicatorIconMenu();
 
+  // disable copy
+  AppIndicatorIconMenu(const AppIndicatorIconMenu&) = delete;
+  AppIndicatorIconMenu& operator=(const AppIndicatorIconMenu&) = delete;
+
   // Sets a menu item at the top of |gtk_menu_| as a replacement for the app
   // indicator icon's click action. |callback| is called when the menu item
   // is activated.
-  void UpdateClickActionReplacementMenuItem(const char* label,
-                                            const base::Closure& callback);
+  void UpdateClickActionReplacementMenuItem(
+      const char* label,
+      const base::RepeatingClosure& callback);
 
   // Refreshes all the menu item labels and menu item checked/enabled states.
   void Refresh();
@@ -54,22 +58,20 @@ class AppIndicatorIconMenu {
   ui::MenuModel* menu_model_;
 
   // Whether a "click action replacement" menu item has been added to the menu.
-  bool click_action_replacement_menu_item_added_;
+  bool click_action_replacement_menu_item_added_ = false;
 
   // Called when the click action replacement menu item is activated. When a
   // menu item from |menu_model_| is activated, MenuModel::ActivatedAt() is
   // invoked and is assumed to do any necessary processing.
-  base::Closure click_action_replacement_callback_;
+  base::RepeatingClosure click_action_replacement_callback_;
 
-  GtkWidget* gtk_menu_;
+  GtkWidget* gtk_menu_ = nullptr;
 
-  bool block_activation_;
-
-  DISALLOW_COPY_AND_ASSIGN(AppIndicatorIconMenu);
+  bool block_activation_ = false;
 };
 
 }  // namespace gtkui
 
 }  // namespace electron
 
-#endif  // SHELL_BROWSER_UI_GTK_APP_INDICATOR_ICON_MENU_H_
+#endif  // ELECTRON_SHELL_BROWSER_UI_GTK_APP_INDICATOR_ICON_MENU_H_

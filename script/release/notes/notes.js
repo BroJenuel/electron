@@ -24,7 +24,7 @@ const NO_NOTES = 'No notes';
 const docTypes = new Set(['doc', 'docs']);
 const featTypes = new Set(['feat', 'feature']);
 const fixTypes = new Set(['fix']);
-const otherTypes = new Set(['spec', 'build', 'test', 'chore', 'deps', 'refactor', 'tools', 'vendor', 'perf', 'style', 'ci']);
+const otherTypes = new Set(['spec', 'build', 'test', 'chore', 'deps', 'refactor', 'tools', 'perf', 'style', 'ci']);
 const knownTypes = new Set([...docTypes.keys(), ...featTypes.keys(), ...fixTypes.keys(), ...otherTypes.keys()]);
 
 const getCacheDir = () => process.env.NOTES_CACHE_PATH || path.resolve(__dirname, '.cache');
@@ -114,6 +114,8 @@ const getNoteFromClerk = async (ghKey) => {
         .slice(PERSIST_LEAD.length).trim() // remove PERSIST_LEAD
         .split(/\r?\n/) // split into lines
         .map(line => line.trim())
+        .map(line => line.replace('&lt;', '<'))
+        .map(line => line.replace('&gt;', '>'))
         .filter(line => line.startsWith(QUOTE_LEAD)) // notes are quoted
         .map(line => line.slice(QUOTE_LEAD.length)); // unquote the lines
 

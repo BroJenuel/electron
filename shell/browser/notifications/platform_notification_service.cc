@@ -46,6 +46,10 @@ class NotificationDelegateImpl final : public electron::NotificationDelegate {
   explicit NotificationDelegateImpl(const std::string& notification_id)
       : notification_id_(notification_id) {}
 
+  // disable copy
+  NotificationDelegateImpl(const NotificationDelegateImpl&) = delete;
+  NotificationDelegateImpl& operator=(const NotificationDelegateImpl&) = delete;
+
   void NotificationDestroyed() override { delete this; }
 
   void NotificationClick() override {
@@ -65,8 +69,6 @@ class NotificationDelegateImpl final : public electron::NotificationDelegate {
 
  private:
   std::string notification_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(NotificationDelegateImpl);
 };
 
 }  // namespace
@@ -78,9 +80,10 @@ PlatformNotificationService::PlatformNotificationService(
 PlatformNotificationService::~PlatformNotificationService() = default;
 
 void PlatformNotificationService::DisplayNotification(
-    content::RenderProcessHost* render_process_host,
+    content::RenderFrameHost* render_frame_host,
     const std::string& notification_id,
     const GURL& origin,
+    const GURL& document_url,
     const blink::PlatformNotificationData& notification_data,
     const blink::NotificationResources& notification_resources) {
   auto* presenter = browser_client_->GetNotificationPresenter();
@@ -101,7 +104,7 @@ void PlatformNotificationService::DisplayNotification(
   auto notification = presenter->CreateNotification(delegate, notification_id);
   if (notification) {
     browser_client_->WebNotificationAllowed(
-        render_process_host->GetID(),
+        render_frame_host,
         base::BindRepeating(&OnWebNotificationAllowed, notification,
                             notification_resources.notification_icon,
                             notification_data));

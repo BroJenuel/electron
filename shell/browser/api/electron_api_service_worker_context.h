@@ -2,8 +2,8 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_BROWSER_API_ELECTRON_API_SERVICE_WORKER_CONTEXT_H_
-#define SHELL_BROWSER_API_ELECTRON_API_SERVICE_WORKER_CONTEXT_H_
+#ifndef ELECTRON_SHELL_BROWSER_API_ELECTRON_API_SERVICE_WORKER_CONTEXT_H_
+#define ELECTRON_SHELL_BROWSER_API_ELECTRON_API_SERVICE_WORKER_CONTEXT_H_
 
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/service_worker_context_observer.h"
@@ -34,6 +34,7 @@ class ServiceWorkerContext
   void OnReportConsoleMessage(int64_t version_id,
                               const GURL& scope,
                               const content::ConsoleMessage& message) override;
+  void OnRegistrationCompleted(const GURL& scope) override;
   void OnDestruct(content::ServiceWorkerContext* context) override;
 
   // gin::Wrappable
@@ -42,23 +43,23 @@ class ServiceWorkerContext
       v8::Isolate* isolate) override;
   const char* GetTypeName() override;
 
+  // disable copy
+  ServiceWorkerContext(const ServiceWorkerContext&) = delete;
+  ServiceWorkerContext& operator=(const ServiceWorkerContext&) = delete;
+
  protected:
   explicit ServiceWorkerContext(v8::Isolate* isolate,
                                 ElectronBrowserContext* browser_context);
   ~ServiceWorkerContext() override;
 
  private:
-  ElectronBrowserContext* browser_context_;
-
   content::ServiceWorkerContext* service_worker_context_;
 
-  base::WeakPtrFactory<ServiceWorkerContext> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerContext);
+  base::WeakPtrFactory<ServiceWorkerContext> weak_ptr_factory_{this};
 };
 
 }  // namespace api
 
 }  // namespace electron
 
-#endif  // SHELL_BROWSER_API_ELECTRON_API_SERVICE_WORKER_CONTEXT_H_
+#endif  // ELECTRON_SHELL_BROWSER_API_ELECTRON_API_SERVICE_WORKER_CONTEXT_H_

@@ -8,12 +8,11 @@
 #include <glib-object.h>
 
 #include "base/logging.h"
-#include "base/strings/string16.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/ui/views/frame/global_menu_bar_registrar_x11.h"
 #include "shell/browser/native_window_views.h"
 #include "shell/browser/ui/electron_menu_model.h"
+#include "shell/browser/ui/views/global_menu_bar_registrar_x11.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/accelerators/menu_label_accelerator_util_linux.h"
@@ -297,7 +296,7 @@ void GlobalMenuBarX11::RegisterAccelerator(DbusmenuMenuitem* item,
     NOTIMPLEMENTED();
     return;
   }
-  std::string name = base::UTF16ToUTF8(base::string16(1, keysym));
+  std::string name = base::UTF16ToUTF8(std::u16string(1, keysym));
   g_variant_builder_add(&builder, "s", name.c_str());
 
   GVariant* inside_array = g_variant_builder_end(&builder);

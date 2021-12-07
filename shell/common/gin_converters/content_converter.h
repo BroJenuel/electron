@@ -2,39 +2,41 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_COMMON_GIN_CONVERTERS_CONTENT_CONVERTER_H_
-#define SHELL_COMMON_GIN_CONVERTERS_CONTENT_CONVERTER_H_
+#ifndef ELECTRON_SHELL_COMMON_GIN_CONVERTERS_CONTENT_CONVERTER_H_
+#define ELECTRON_SHELL_COMMON_GIN_CONVERTERS_CONTENT_CONVERTER_H_
 
 #include <utility>
 
 #include "content/public/browser/permission_type.h"
-#include "content/public/common/menu_item.h"
 #include "content/public/common/referrer.h"
 #include "content/public/common/stop_find_action.h"
 #include "gin/converter.h"
+#include "third_party/blink/public/mojom/choosers/popup_menu.mojom.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom.h"
 
 namespace content {
 struct ContextMenuParams;
 struct NativeWebKeyboardEvent;
+class RenderFrameHost;
 class WebContents;
 }  // namespace content
 
-using ContextMenuParamsWithWebContents =
-    std::pair<content::ContextMenuParams, content::WebContents*>;
+using ContextMenuParamsWithRenderFrameHost =
+    std::pair<content::ContextMenuParams, content::RenderFrameHost*>;
 
 namespace gin {
 
 template <>
-struct Converter<content::MenuItem::Type> {
+struct Converter<blink::mojom::MenuItem::Type> {
   static v8::Local<v8::Value> ToV8(v8::Isolate* isolate,
-                                   const content::MenuItem::Type& val);
+                                   const blink::mojom::MenuItem::Type& val);
 };
 
 template <>
-struct Converter<ContextMenuParamsWithWebContents> {
-  static v8::Local<v8::Value> ToV8(v8::Isolate* isolate,
-                                   const ContextMenuParamsWithWebContents& val);
+struct Converter<ContextMenuParamsWithRenderFrameHost> {
+  static v8::Local<v8::Value> ToV8(
+      v8::Isolate* isolate,
+      const ContextMenuParamsWithRenderFrameHost& val);
 };
 
 template <>
@@ -86,4 +88,4 @@ struct Converter<content::NativeWebKeyboardEvent> {
 
 }  // namespace gin
 
-#endif  // SHELL_COMMON_GIN_CONVERTERS_CONTENT_CONVERTER_H_
+#endif  // ELECTRON_SHELL_COMMON_GIN_CONVERTERS_CONTENT_CONVERTER_H_

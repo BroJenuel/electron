@@ -5,13 +5,11 @@
 #include "shell/browser/api/electron_api_url_loader.h"
 
 #include <algorithm>
-#include <map>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "base/containers/id_map.h"
 #include "base/no_destructor.h"
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
@@ -22,6 +20,7 @@
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "services/network/public/mojom/chunked_data_pipe_getter.mojom.h"
+#include "services/network/public/mojom/http_raw_headers.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "shell/browser/api/electron_api_session.h"
 #include "shell/browser/electron_browser_context.h"
@@ -209,7 +208,8 @@ class JSChunkedDataPipeGetter : public gin::Wrappable<JSChunkedDataPipeGetter>,
     if (result == MOJO_RESULT_OK) {
       promise.Resolve();
     } else {
-      promise.RejectWithErrorMessage("mojo result not ok");
+      promise.RejectWithErrorMessage("mojo result not ok: " +
+                                     std::to_string(result));
       Finished();
     }
   }
@@ -260,12 +260,6 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
           setting: "This feature cannot be disabled."
         })");
 
-base::IDMap<SimpleURLLoaderWrapper*>& GetAllRequests() {
-  static base::NoDestructor<base::IDMap<SimpleURLLoaderWrapper*>>
-      s_all_requests;
-  return *s_all_requests;
-}
-
 }  // namespace
 
 gin::WrapperInfo SimpleURLLoaderWrapper::kWrapperInfo = {
@@ -274,12 +268,20 @@ gin::WrapperInfo SimpleURLLoaderWrapper::kWrapperInfo = {
 SimpleURLLoaderWrapper::SimpleURLLoaderWrapper(
     std::unique_ptr<network::ResourceRequest> request,
     network::mojom::URLLoaderFactory* url_loader_factory,
-    int options)
-    : id_(GetAllRequests().Add(this)) {
-  // We slightly abuse the |render_frame_id| field in ResourceRequest so that
-  // we can correlate any authentication events that arrive with this request.
-  request->render_frame_id = id_;
-
+    int options) {
+  if (!request->trusted_params)
+    request->trusted_params = network::ResourceRequest::TrustedParams();
+  mojo::PendingRemote<network::mojom::URLLoaderNetworkServiceObserver>
+      url_loader_network_observer_remote;
+  url_loader_network_observer_receivers_.Add(
+      this,
+      url_loader_network_observer_remote.InitWithNewPipeAndPassReceiver());
+  request->trusted_params->url_loader_network_observer =
+      std::move(url_loader_network_observer_remote);
+  // Chromium filters headers using browser rules, while for net module we have
+  // every header passed. The following setting will allow us to capture the
+  // raw headers in the URLLoader.
+  request->report_raw_headers = true;
   // SimpleURLLoader wants to control the request body itself. We have other
   // ideas.
   auto request_body = std::move(request->request_body);
@@ -312,24 +314,19 @@ void SimpleURLLoaderWrapper::Pin() {
 }
 
 void SimpleURLLoaderWrapper::PinBodyGetter(v8::Local<v8::Value> body_getter) {
-  pinned_chunk_pipe_getter_.Reset(v8::Isolate::GetCurrent(), body_getter);
+  pinned_chunk_pipe_getter_.Reset(JavascriptEnvironment::GetIsolate(),
+                                  body_getter);
 }
 
-SimpleURLLoaderWrapper::~SimpleURLLoaderWrapper() {
-  GetAllRequests().Remove(id_);
-}
-
-// static
-SimpleURLLoaderWrapper* SimpleURLLoaderWrapper::FromID(uint32_t id) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  return GetAllRequests().Lookup(id);
-}
+SimpleURLLoaderWrapper::~SimpleURLLoaderWrapper() = default;
 
 void SimpleURLLoaderWrapper::OnAuthRequired(
+    const absl::optional<base::UnguessableToken>& window_id,
+    uint32_t request_id,
     const GURL& url,
     bool first_auth_attempt,
-    net::AuthChallengeInfo auth_info,
-    network::mojom::URLResponseHeadPtr head,
+    const net::AuthChallengeInfo& auth_info,
+    const scoped_refptr<net::HttpResponseHeaders>& head_headers,
     mojo::PendingRemote<network::mojom::AuthChallengeResponder>
         auth_challenge_responder) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -343,9 +340,9 @@ void SimpleURLLoaderWrapper::OnAuthRequired(
   auto cb = base::BindOnce(
       [](mojo::Remote<network::mojom::AuthChallengeResponder> auth_responder,
          gin::Arguments* args) {
-        base::string16 username_str, password_str;
+        std::u16string username_str, password_str;
         if (!args->GetNext(&username_str) || !args->GetNext(&password_str)) {
-          auth_responder->OnAuthCredentials(base::nullopt);
+          auth_responder->OnAuthCredentials(absl::nullopt);
           return;
         }
         auth_responder->OnAuthCredentials(
@@ -353,6 +350,33 @@ void SimpleURLLoaderWrapper::OnAuthRequired(
       },
       std::move(auth_responder));
   Emit("login", auth_info, base::AdaptCallbackForRepeating(std::move(cb)));
+}
+
+void SimpleURLLoaderWrapper::OnSSLCertificateError(
+    const GURL& url,
+    int net_error,
+    const net::SSLInfo& ssl_info,
+    bool fatal,
+    OnSSLCertificateErrorCallback response) {
+  std::move(response).Run(net_error);
+}
+
+void SimpleURLLoaderWrapper::OnClearSiteData(const GURL& url,
+                                             const std::string& header_value,
+                                             int32_t load_flags,
+                                             OnClearSiteDataCallback callback) {
+  std::move(callback).Run();
+}
+void SimpleURLLoaderWrapper::OnLoadingStateUpdate(
+    network::mojom::LoadInfoPtr info,
+    OnLoadingStateUpdateCallback callback) {
+  std::move(callback).Run();
+}
+
+void SimpleURLLoaderWrapper::Clone(
+    mojo::PendingReceiver<network::mojom::URLLoaderNetworkServiceObserver>
+        observer) {
+  url_loader_network_observer_receivers_.Add(this, std::move(observer));
 }
 
 void SimpleURLLoaderWrapper::Cancel() {
@@ -470,10 +494,6 @@ gin::Handle<SimpleURLLoaderWrapper> SimpleURLLoaderWrapper::Create(
     options |= network::mojom::kURLLoadOptionBlockAllCookies;
   }
 
-  // Chromium filters headers using browser rules, while for net module we have
-  // every header passed.
-  request->report_raw_headers = true;
-
   v8::Local<v8::Value> body;
   v8::Local<v8::Value> chunk_pipe_getter;
   if (opts.Get("body", &body)) {
@@ -492,8 +512,11 @@ gin::Handle<SimpleURLLoaderWrapper> SimpleURLLoaderWrapper::Create(
                               args->isolate(), body_func,
                               data_pipe_getter.InitWithNewPipeAndPassReceiver())
                               .ToV8();
-      request->request_body = new network::ResourceRequestBody();
-      request->request_body->SetToChunkedDataPipe(std::move(data_pipe_getter));
+      request->request_body =
+          base::MakeRefCounted<network::ResourceRequestBody>();
+      request->request_body->SetToChunkedDataPipe(
+          std::move(data_pipe_getter),
+          network::ResourceRequestBody::ReadOnlyOnce(false));
     }
   }
 
@@ -555,9 +578,8 @@ void SimpleURLLoaderWrapper::OnResponseStarted(
   dict.Set("httpVersion", response_head.headers->GetHttpVersion());
   // Note that |response_head.headers| are filtered by Chromium and should not
   // be used here.
-  DCHECK(response_head.raw_request_response_info);
-  dict.Set("rawHeaders",
-           response_head.raw_request_response_info->response_headers);
+  DCHECK(!response_head.raw_response_headers.empty());
+  dict.Set("rawHeaders", response_head.raw_response_headers);
   Emit("response-started", final_url, dict);
 }
 

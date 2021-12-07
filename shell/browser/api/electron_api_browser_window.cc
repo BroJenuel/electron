@@ -4,8 +4,6 @@
 
 #include "shell/browser/api/electron_api_browser_window.h"
 
-#include <memory>
-
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"  // nogncheck
 #include "content/browser/renderer_host/render_widget_host_owner_delegate.h"  // nogncheck
@@ -32,22 +30,32 @@ namespace api {
 
 BrowserWindow::BrowserWindow(gin::Arguments* args,
                              const gin_helper::Dictionary& options)
-    : BaseWindow(args->isolate(), options), weak_factory_(this) {
+    : BaseWindow(args->isolate(), options) {
   // Use options.webPreferences in WebContents.
   v8::Isolate* isolate = args->isolate();
   gin_helper::Dictionary web_preferences =
       gin::Dictionary::CreateEmpty(isolate);
   options.Get(options::kWebPreferences, &web_preferences);
 
-  // Copy the backgroundColor to webContents.
   v8::Local<v8::Value> value;
-  if (options.Get(options::kBackgroundColor, &value))
-    web_preferences.Set(options::kBackgroundColor, value);
+  bool transparent = false;
+  options.Get(options::kTransparent, &transparent);
 
-  // Copy the transparent setting to webContents
-  v8::Local<v8::Value> transparent;
-  if (options.Get("transparent", &transparent))
-    web_preferences.Set("transparent", transparent);
+  std::string vibrancy_type;
+#if defined(OS_MAC)
+  options.Get(options::kVibrancyType, &vibrancy_type);
+#endif
+
+  // Copy the backgroundColor to webContents.
+  if (options.Get(options::kBackgroundColor, &value)) {
+    web_preferences.SetHidden(options::kBackgroundColor, value);
+  } else if (!vibrancy_type.empty() || transparent) {
+    // If the BrowserWindow is transparent or a vibrancy type has been set,
+    // also propagate transparency to the WebContents unless a separate
+    // backgroundColor has been set.
+    web_preferences.SetHidden(options::kBackgroundColor,
+                              ToRGBAHex(SK_ColorTRANSPARENT));
+  }
 
   // Copy the show setting to webContents, but only if we don't want to paint
   // when initially hidden
@@ -57,6 +65,17 @@ BrowserWindow::BrowserWindow(gin::Arguments* args,
     bool show = true;
     options.Get(options::kShow, &show);
     web_preferences.Set(options::kShow, show);
+  }
+
+  bool titleBarOverlay = false;
+  options.Get(options::ktitleBarOverlay, &titleBarOverlay);
+  if (titleBarOverlay) {
+    std::string enabled_features = "";
+    if (web_preferences.Get(options::kEnableBlinkFeatures, &enabled_features)) {
+      enabled_features += ",";
+    }
+    enabled_features += features::kWebAppWindowControlsOverlay.name;
+    web_preferences.Set(options::kEnableBlinkFeatures, enabled_features);
   }
 
   // Copy the webContents option to webPreferences. This is only used internally
@@ -77,10 +96,6 @@ BrowserWindow::BrowserWindow(gin::Arguments* args,
   api_web_contents_ = web_contents->GetWeakPtr();
   api_web_contents_->AddObserver(this);
   Observe(api_web_contents_->web_contents());
-
-  // Keep a copy of the options for later use.
-  gin_helper::Dictionary(isolate, web_contents.ToV8().As<v8::Object>())
-      .Set("browserWindowOptions", options);
 
   // Associate with BrowserWindow.
   web_contents->SetOwnerWindow(window());
@@ -104,13 +119,16 @@ BrowserWindow::BrowserWindow(gin::Arguments* args,
 }
 
 BrowserWindow::~BrowserWindow() {
-  // FIXME This is a hack rather than a proper fix preventing shutdown crashes.
-  if (api_web_contents_)
+  if (api_web_contents_) {
+    // Cleanup the observers if user destroyed this instance directly instead of
+    // gracefully closing content::WebContents.
+    auto* host = web_contents()->GetRenderViewHost();
+    if (host)
+      host->GetWidget()->RemoveInputEventObserver(this);
     api_web_contents_->RemoveObserver(this);
-  // Note that the OnWindowClosed will not be called after the destructor runs,
-  // since the window object is managed by the BaseWindow class.
-  if (web_contents())
-    Cleanup();
+    // Destroy the WebContents.
+    OnCloseContents();
+  }
 }
 
 void BrowserWindow::OnInputEvent(const blink::WebInputEvent& event) {
@@ -133,20 +151,20 @@ void BrowserWindow::RenderViewHostChanged(content::RenderViewHost* old_host,
     new_host->GetWidget()->AddInputEventObserver(this);
 }
 
-void BrowserWindow::RenderViewCreated(
-    content::RenderViewHost* render_view_host) {
+void BrowserWindow::RenderFrameCreated(
+    content::RenderFrameHost* render_frame_host) {
   if (!window()->transparent())
     return;
 
   content::RenderWidgetHostImpl* impl = content::RenderWidgetHostImpl::FromID(
-      render_view_host->GetProcess()->GetID(),
-      render_view_host->GetRoutingID());
+      render_frame_host->GetProcess()->GetID(),
+      render_frame_host->GetRoutingID());
   if (impl)
     impl->owner_delegate()->SetBackgroundOpaque(false);
 }
 
 void BrowserWindow::DidFirstVisuallyNonEmptyPaint() {
-  if (window()->IsVisible())
+  if (window()->IsClosed() || window()->IsVisible())
     return;
 
   // When there is a non-empty first paint, resize the RenderWidget to force
@@ -173,34 +191,14 @@ void BrowserWindow::OnRendererUnresponsive(content::RenderProcessHost*) {
   ScheduleUnresponsiveEvent(50);
 }
 
+void BrowserWindow::WebContentsDestroyed() {
+  api_web_contents_ = nullptr;
+  CloseImmediately();
+}
+
 void BrowserWindow::OnCloseContents() {
-  // On some machines it may happen that the window gets destroyed for twice,
-  // checking web_contents() can effectively guard against that.
-  // https://github.com/electron/electron/issues/16202.
-  //
-  // TODO(zcbenz): We should find out the root cause and improve the closing
-  // procedure of BrowserWindow.
-  if (!web_contents())
-    return;
-
-  // Close all child windows before closing current window.
-  v8::Locker locker(isolate());
-  v8::HandleScope handle_scope(isolate());
-  for (v8::Local<v8::Value> value : child_windows_.Values(isolate())) {
-    gin::Handle<BrowserWindow> child;
-    if (gin::ConvertFromV8(isolate(), value, &child) && !child.IsEmpty())
-      child->window()->CloseImmediately();
-  }
-
-  // When the web contents is gone, close the window immediately, but the
-  // memory will not be freed until you call delete.
-  // In this way, it would be safe to manage windows via smart pointers. If you
-  // want to free memory when the window is closed, you can do deleting by
-  // overriding the OnWindowClosed method in the observer.
-  window()->CloseImmediately();
-
-  // Do not sent "unresponsive" event after window is closed.
-  window_unresponsive_closure_.Cancel();
+  BaseWindow::ResetBrowserViews();
+  api_web_contents_->Destroy();
 }
 
 void BrowserWindow::OnRendererResponsive(content::RenderProcessHost*) {
@@ -227,7 +225,7 @@ void BrowserWindow::OnActivateContents() {
 #endif
 }
 
-void BrowserWindow::OnPageTitleUpdated(const base::string16& title,
+void BrowserWindow::OnPageTitleUpdated(const std::u16string& title,
                                        bool explicit_set) {
   // Change window title to page title.
   auto self = GetWeakPtr();
@@ -255,43 +253,52 @@ void BrowserWindow::OnCloseButtonClicked(bool* prevent_default) {
   if (window_unresponsive_closure_.IsCancelled())
     ScheduleUnresponsiveEvent(5000);
 
-  if (!web_contents())
-    // Already closed by renderer
+  // Already closed by renderer.
+  if (!web_contents() || !api_web_contents_)
     return;
 
   // Required to make beforeunload handler work.
   api_web_contents_->NotifyUserActivation();
 
-  if (web_contents()->NeedToFireBeforeUnloadOrUnloadEvents())
-    web_contents()->DispatchBeforeUnload(false /* auto_cancel */);
-  else
-    web_contents()->Close();
-}
+  // Trigger beforeunload events for associated BrowserViews.
+  for (NativeBrowserView* view : window_->browser_views()) {
+    auto* vwc = view->web_contents();
+    auto* api_web_contents = api::WebContents::From(vwc);
 
-void BrowserWindow::OnWindowClosed() {
-  // We need to reset the browser views before we call Cleanup, because the
-  // browser views are child views of the main web contents view, which will be
-  // deleted by Cleanup.
-  BaseWindow::ResetBrowserViews();
-  Cleanup();
-  // See BaseWindow::OnWindowClosed on why calling InvalidateWeakPtrs.
-  weak_factory_.InvalidateWeakPtrs();
-  BaseWindow::OnWindowClosed();
-}
+    // Required to make beforeunload handler work.
+    if (api_web_contents)
+      api_web_contents->NotifyUserActivation();
+
+    if (vwc) {
+      if (vwc->NeedToFireBeforeUnloadOrUnloadEvents()) {
+        vwc->DispatchBeforeUnload(false /* auto_cancel */);
+      }
+    }
+  }
+
+  if (web_contents()->NeedToFireBeforeUnloadOrUnloadEvents()) {
+    web_contents()->DispatchBeforeUnload(false /* auto_cancel */);
+  } else {
+    web_contents()->Close();
+  }
+}  // namespace api
 
 void BrowserWindow::OnWindowBlur() {
-  web_contents()->StoreFocus();
+  if (api_web_contents_)
+    web_contents()->StoreFocus();
 
   BaseWindow::OnWindowBlur();
 }
 
 void BrowserWindow::OnWindowFocus() {
-  web_contents()->RestoreFocus();
-
+  // focus/blur events might be emitted while closing window.
+  if (api_web_contents_) {
+    web_contents()->RestoreFocus();
 #if !defined(OS_MAC)
-  if (!api_web_contents_->IsDevToolsOpened())
-    web_contents()->Focus();
+    if (!api_web_contents_->IsDevToolsOpened())
+      web_contents()->Focus();
 #endif
+  }
 
   BaseWindow::OnWindowFocus();
 }
@@ -301,6 +308,7 @@ void BrowserWindow::OnWindowIsKeyChanged(bool is_key) {
   auto* rwhv = web_contents()->GetRenderWidgetHostView();
   if (rwhv)
     rwhv->SetActive(is_key);
+  window()->SetActive(is_key);
 #endif
 }
 
@@ -325,6 +333,27 @@ void BrowserWindow::OnWindowLeaveFullScreen() {
   BaseWindow::OnWindowLeaveFullScreen();
 }
 
+void BrowserWindow::UpdateWindowControlsOverlay(
+    const gfx::Rect& bounding_rect) {
+  web_contents()->UpdateWindowControlsOverlay(bounding_rect);
+}
+
+void BrowserWindow::CloseImmediately() {
+  // Close all child windows before closing current window.
+  v8::Locker locker(isolate());
+  v8::HandleScope handle_scope(isolate());
+  for (v8::Local<v8::Value> value : child_windows_.Values(isolate())) {
+    gin::Handle<BrowserWindow> child;
+    if (gin::ConvertFromV8(isolate(), value, &child) && !child.IsEmpty())
+      child->window()->CloseImmediately();
+  }
+
+  BaseWindow::CloseImmediately();
+
+  // Do not sent "unresponsive" event after window is closed.
+  window_unresponsive_closure_.Cancel();
+}
+
 void BrowserWindow::Focus() {
   if (api_web_contents_->IsOffScreen())
     FocusOnWebView();
@@ -341,17 +370,18 @@ void BrowserWindow::Blur() {
 
 void BrowserWindow::SetBackgroundColor(const std::string& color_name) {
   BaseWindow::SetBackgroundColor(color_name);
-  auto* view = web_contents()->GetRenderWidgetHostView();
-  if (view)
-    view->SetBackgroundColor(ParseHexColor(color_name));
+  SkColor color = ParseHexColor(color_name);
+  web_contents()->SetPageBaseBackgroundColor(color);
+  auto* rwhv = web_contents()->GetRenderWidgetHostView();
+  if (rwhv)
+    rwhv->SetBackgroundColor(color);
   // Also update the web preferences object otherwise the view will be reset on
   // the next load URL call
   if (api_web_contents_) {
     auto* web_preferences =
         WebContentsPreferences::From(api_web_contents_->web_contents());
     if (web_preferences) {
-      web_preferences->preference()->SetStringKey(options::kBackgroundColor,
-                                                  color_name);
+      web_preferences->SetBackgroundColor(ParseHexColor(color_name));
     }
   }
 }
@@ -378,11 +408,23 @@ void BrowserWindow::RemoveBrowserView(v8::Local<v8::Value> value) {
 #endif
 }
 
+void BrowserWindow::SetTopBrowserView(v8::Local<v8::Value> value,
+                                      gin_helper::Arguments* args) {
+  BaseWindow::SetTopBrowserView(value, args);
+#if defined(OS_MAC)
+  UpdateDraggableRegions(draggable_regions_);
+#endif
+}
+
 void BrowserWindow::ResetBrowserViews() {
   BaseWindow::ResetBrowserViews();
 #if defined(OS_MAC)
   UpdateDraggableRegions(draggable_regions_);
 #endif
+}
+
+void BrowserWindow::OnDevToolsResized() {
+  UpdateDraggableRegions(draggable_regions_);
 }
 
 void BrowserWindow::SetVibrancy(v8::Isolate* isolate,
@@ -429,7 +471,7 @@ void BrowserWindow::ScheduleUnresponsiveEvent(int ms) {
       &BrowserWindow::NotifyWindowUnresponsive, GetWeakPtr()));
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, window_unresponsive_closure_.callback(),
-      base::TimeDelta::FromMilliseconds(ms));
+      base::Milliseconds(ms));
 }
 
 void BrowserWindow::NotifyWindowUnresponsive() {
@@ -438,17 +480,6 @@ void BrowserWindow::NotifyWindowUnresponsive() {
       !IsUnresponsiveEventSuppressed()) {
     Emit("unresponsive");
   }
-}
-
-void BrowserWindow::Cleanup() {
-  auto* host = web_contents()->GetRenderViewHost();
-  if (host)
-    host->GetWidget()->RemoveInputEventObserver(this);
-
-  // Destroy WebContents asynchronously unless app is shutting down,
-  // because destroy() might be called inside WebContents's event handler.
-  api_web_contents_->DestroyWebContents(!Browser::Get()->is_shutting_down());
-  Observe(nullptr);
 }
 
 void BrowserWindow::OnWindowShow() {
@@ -509,7 +540,6 @@ v8::Local<v8::Value> BrowserWindow::From(v8::Isolate* isolate,
 
 namespace {
 
-using electron::api::BaseWindow;
 using electron::api::BrowserWindow;
 
 void Initialize(v8::Local<v8::Object> exports,

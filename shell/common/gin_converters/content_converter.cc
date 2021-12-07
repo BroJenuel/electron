@@ -5,76 +5,21 @@
 #include "shell/common/gin_converters/content_converter.h"
 
 #include <string>
-#include <vector>
 
 #include "content/public/browser/context_menu_params.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/untrustworthy_context_menu_params.h"
 #include "shell/browser/api/electron_api_web_contents.h"
 #include "shell/browser/web_contents_permission_helper.h"
 #include "shell/common/gin_converters/blink_converter.h"
 #include "shell/common/gin_converters/callback_converter.h"
+#include "shell/common/gin_converters/frame_converter.h"
 #include "shell/common/gin_converters/gfx_converter.h"
 #include "shell/common/gin_converters/gurl_converter.h"
 #include "shell/common/gin_helper/dictionary.h"
+#include "third_party/blink/public/common/context_menu_data/untrustworthy_context_menu_params.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
-
-namespace {
-
-void ExecuteCommand(content::WebContents* web_contents,
-                    int action,
-                    const content::CustomContextMenuContext& context) {
-  web_contents->ExecuteCustomContextMenuCommand(action, context);
-}
-
-// Forward declaration for nested recursive call.
-v8::Local<v8::Value> MenuToV8(v8::Isolate* isolate,
-                              content::WebContents* web_contents,
-                              const content::CustomContextMenuContext& context,
-                              const std::vector<content::MenuItem>& menu);
-
-v8::Local<v8::Value> MenuItemToV8(
-    v8::Isolate* isolate,
-    content::WebContents* web_contents,
-    const content::CustomContextMenuContext& context,
-    const content::MenuItem& item) {
-  gin_helper::Dictionary v8_item = gin::Dictionary::CreateEmpty(isolate);
-  switch (item.type) {
-    case content::MenuItem::CHECKABLE_OPTION:
-    case content::MenuItem::GROUP:
-      v8_item.Set("checked", item.checked);
-      FALLTHROUGH;
-    case content::MenuItem::OPTION:
-    case content::MenuItem::SUBMENU:
-      v8_item.Set("label", item.label);
-      v8_item.Set("enabled", item.enabled);
-      FALLTHROUGH;
-    default:
-      v8_item.Set("type", item.type);
-  }
-  if (item.type == content::MenuItem::SUBMENU)
-    v8_item.Set("submenu",
-                MenuToV8(isolate, web_contents, context, item.submenu));
-  else if (item.action > 0)
-    v8_item.Set("click", base::BindRepeating(ExecuteCommand, web_contents,
-                                             item.action, context));
-  return v8_item.GetHandle();
-}
-
-v8::Local<v8::Value> MenuToV8(v8::Isolate* isolate,
-                              content::WebContents* web_contents,
-                              const content::CustomContextMenuContext& context,
-                              const std::vector<content::MenuItem>& menu) {
-  std::vector<v8::Local<v8::Value>> v8_menu;
-  v8_menu.reserve(menu.size());
-  for (const auto& menu_item : menu)
-    v8_menu.push_back(MenuItemToV8(isolate, web_contents, context, menu_item));
-  return gin::ConvertToV8(isolate, v8_menu);
-}
-
-}  // namespace
 
 namespace gin {
 
@@ -110,30 +55,32 @@ struct Converter<ui::MenuSourceType> {
 };
 
 // static
-v8::Local<v8::Value> Converter<content::MenuItem::Type>::ToV8(
+v8::Local<v8::Value> Converter<blink::mojom::MenuItem::Type>::ToV8(
     v8::Isolate* isolate,
-    const content::MenuItem::Type& val) {
+    const blink::mojom::MenuItem::Type& val) {
   switch (val) {
-    case content::MenuItem::CHECKABLE_OPTION:
+    case blink::mojom::MenuItem::Type::kCheckableOption:
       return StringToV8(isolate, "checkbox");
-    case content::MenuItem::GROUP:
+    case blink::mojom::MenuItem::Type::kGroup:
       return StringToV8(isolate, "radio");
-    case content::MenuItem::SEPARATOR:
+    case blink::mojom::MenuItem::Type::kSeparator:
       return StringToV8(isolate, "separator");
-    case content::MenuItem::SUBMENU:
+    case blink::mojom::MenuItem::Type::kSubMenu:
       return StringToV8(isolate, "submenu");
-    case content::MenuItem::OPTION:
+    case blink::mojom::MenuItem::Type::kOption:
     default:
       return StringToV8(isolate, "normal");
   }
 }
 
 // static
-v8::Local<v8::Value> Converter<ContextMenuParamsWithWebContents>::ToV8(
+v8::Local<v8::Value> Converter<ContextMenuParamsWithRenderFrameHost>::ToV8(
     v8::Isolate* isolate,
-    const ContextMenuParamsWithWebContents& val) {
+    const ContextMenuParamsWithRenderFrameHost& val) {
   const auto& params = val.first;
+  content::RenderFrameHost* render_frame_host = val.second;
   gin_helper::Dictionary dict = gin::Dictionary::CreateEmpty(isolate);
+  dict.SetGetter("frame", render_frame_host, v8::DontEnum);
   dict.Set("x", params.x);
   dict.Set("y", params.y);
   dict.Set("linkURL", params.link_url);
@@ -144,7 +91,7 @@ v8::Local<v8::Value> Converter<ContextMenuParamsWithWebContents>::ToV8(
   dict.Set("mediaType", params.media_type);
   dict.Set("mediaFlags", MediaFlagsToV8(isolate, params.media_flags));
   bool has_image_contents =
-      (params.media_type == blink::ContextMenuDataMediaType::kImage) &&
+      (params.media_type == blink::mojom::ContextMenuDataMediaType::kImage) &&
       params.has_image_contents;
   dict.Set("hasImageContents", has_image_contents);
   dict.Set("isEditable", params.is_editable);
@@ -166,9 +113,6 @@ v8::Local<v8::Value> Converter<ContextMenuParamsWithWebContents>::ToV8(
   dict.Set("inputFieldType", params.input_field_type);
   dict.Set("menuSourceType", params.source_type);
 
-  if (params.custom_context.is_pepper_menu)
-    dict.Set("menu", MenuToV8(isolate, val.second, params.custom_context,
-                              params.custom_items));
   return gin::ConvertToV8(isolate, dict);
 }
 
@@ -210,6 +154,8 @@ v8::Local<v8::Value> Converter<content::PermissionType>::ToV8(
       return StringToV8(isolate, "clipboard-read");
     case content::PermissionType::CLIPBOARD_SANITIZED_WRITE:
       return StringToV8(isolate, "clipboard-sanitized-write");
+    case content::PermissionType::FILE_HANDLING:
+      return StringToV8(isolate, "file-handling");
     case content::PermissionType::FONT_ACCESS:
       return StringToV8(isolate, "font-access");
     case content::PermissionType::IDLE_DETECTION:
@@ -263,6 +209,8 @@ v8::Local<v8::Value> Converter<content::PermissionType>::ToV8(
       return StringToV8(isolate, "openExternal");
     case PermissionType::SERIAL:
       return StringToV8(isolate, "serial");
+    case PermissionType::HID:
+      return StringToV8(isolate, "hid");
     default:
       return StringToV8(isolate, "unknown");
   }
@@ -360,25 +308,7 @@ bool Converter<content::NativeWebKeyboardEvent>::FromV8(
 v8::Local<v8::Value> Converter<content::NativeWebKeyboardEvent>::ToV8(
     v8::Isolate* isolate,
     const content::NativeWebKeyboardEvent& in) {
-  gin_helper::Dictionary dict = gin::Dictionary::CreateEmpty(isolate);
-
-  if (in.GetType() == blink::WebInputEvent::Type::kRawKeyDown)
-    dict.Set("type", "keyDown");
-  else if (in.GetType() == blink::WebInputEvent::Type::kKeyUp)
-    dict.Set("type", "keyUp");
-  dict.Set("key", ui::KeycodeConverter::DomKeyToKeyString(in.dom_key));
-  dict.Set("code", ui::KeycodeConverter::DomCodeToCodeString(
-                       static_cast<ui::DomCode>(in.dom_code)));
-
-  using Modifiers = blink::WebInputEvent::Modifiers;
-  dict.Set("isAutoRepeat", (in.GetModifiers() & Modifiers::kIsAutoRepeat) != 0);
-  dict.Set("isComposing", (in.GetModifiers() & Modifiers::kIsComposing) != 0);
-  dict.Set("shift", (in.GetModifiers() & Modifiers::kShiftKey) != 0);
-  dict.Set("control", (in.GetModifiers() & Modifiers::kControlKey) != 0);
-  dict.Set("alt", (in.GetModifiers() & Modifiers::kAltKey) != 0);
-  dict.Set("meta", (in.GetModifiers() & Modifiers::kMetaKey) != 0);
-
-  return dict.GetHandle();
+  return ConvertToV8(isolate, static_cast<blink::WebKeyboardEvent>(in));
 }
 
 }  // namespace gin

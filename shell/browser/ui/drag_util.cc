@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "ui/gfx/skia_util.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 
 namespace electron {
 
@@ -32,8 +32,8 @@ std::unique_ptr<SkRegion> DraggableRegionsToSkRegion(
   auto sk_region = std::make_unique<SkRegion>();
   for (const auto& region : regions) {
     sk_region->op(
-        {region->bounds.x(), region->bounds.y(), region->bounds.right(),
-         region->bounds.bottom()},
+        SkIRect::MakeLTRB(region->bounds.x(), region->bounds.y(),
+                          region->bounds.right(), region->bounds.bottom()),
         region->draggable ? SkRegion::kUnion_Op : SkRegion::kDifference_Op);
   }
   return sk_region;

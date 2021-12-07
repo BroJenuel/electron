@@ -1,4 +1,4 @@
-# Snapcraft Guide (Ubuntu Software Center & More)
+# Snapcraft Guide (Linux)
 
 This guide provides information on how to package your Electron application
 for any Snapcraft environment, including the Ubuntu Software Center.
@@ -83,7 +83,7 @@ snap(options)
 
 ### Step 1: Create Sample Snapcraft Project
 
-Create your project directory and add add the following to `snap/snapcraft.yaml`:
+Create your project directory and add the following to `snap/snapcraft.yaml`:
 
 ```yaml
 name: electron-packager-hello-world

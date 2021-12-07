@@ -15,20 +15,23 @@
 
 namespace electron {
 
-AutofillDriver::AutofillDriver(
-    content::RenderFrameHost* render_frame_host,
-    mojom::ElectronAutofillDriverAssociatedRequest request)
-    : render_frame_host_(render_frame_host), binding_(this) {
+AutofillDriver::AutofillDriver(content::RenderFrameHost* render_frame_host)
+    : render_frame_host_(render_frame_host) {
   autofill_popup_ = std::make_unique<AutofillPopup>();
-  binding_.Bind(std::move(request));
-}
+}  // namespace electron
 
 AutofillDriver::~AutofillDriver() = default;
 
+void AutofillDriver::BindPendingReceiver(
+    mojo::PendingAssociatedReceiver<mojom::ElectronAutofillDriver>
+        pending_receiver) {
+  receiver_.Bind(std::move(pending_receiver));
+}
+
 void AutofillDriver::ShowAutofillPopup(
     const gfx::RectF& bounds,
-    const std::vector<base::string16>& values,
-    const std::vector<base::string16>& labels) {
+    const std::vector<std::u16string>& values,
+    const std::vector<std::u16string>& labels) {
   v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
   v8::HandleScope scope(isolate);
   auto* web_contents = api::WebContents::From(

@@ -2,8 +2,8 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_BROWSER_OSR_OSR_WEB_CONTENTS_VIEW_H_
-#define SHELL_BROWSER_OSR_OSR_WEB_CONTENTS_VIEW_H_
+#ifndef ELECTRON_SHELL_BROWSER_OSR_OSR_WEB_CONTENTS_VIEW_H_
+#define ELECTRON_SHELL_BROWSER_OSR_OSR_WEB_CONTENTS_VIEW_H_
 
 #include "shell/browser/native_window.h"
 #include "shell/browser/native_window_observer.h"
@@ -57,11 +57,12 @@ class OffScreenWebContentsView : public content::WebContentsView,
       content::RenderWidgetHost* render_widget_host) override;
   content::RenderWidgetHostViewBase* CreateViewForChildWidget(
       content::RenderWidgetHost* render_widget_host) override;
-  void SetPageTitle(const base::string16& title) override;
+  void SetPageTitle(const std::u16string& title) override;
   void RenderViewReady() override;
   void RenderViewHostChanged(content::RenderViewHost* old_host,
                              content::RenderViewHost* new_host) override;
   void SetOverscrollControllerEnabled(bool enabled) override;
+  void OnCapturerCountChanged() override;
 
 #if defined(OS_MAC)
   bool CloseTabAfterEventTrackingIfNeeded() override;
@@ -74,7 +75,7 @@ class OffScreenWebContentsView : public content::WebContentsView,
                      const gfx::Vector2d& image_offset,
                      const blink::mojom::DragEventSourceInfo& event_info,
                      content::RenderWidgetHostImpl* source_rwh) override;
-  void UpdateDragCursor(blink::DragOperation operation) override;
+  void UpdateDragCursor(ui::mojom::DragOperation operation) override;
   void SetPainting(bool painting);
   bool IsPainting() const;
   void SetFrameRate(int frame_rate);
@@ -88,7 +89,7 @@ class OffScreenWebContentsView : public content::WebContentsView,
 
   OffScreenRenderWidgetHostView* GetView() const;
 
-  NativeWindow* native_window_;
+  NativeWindow* native_window_ = nullptr;
 
   const bool transparent_;
   bool painting_ = true;
@@ -105,4 +106,4 @@ class OffScreenWebContentsView : public content::WebContentsView,
 
 }  // namespace electron
 
-#endif  // SHELL_BROWSER_OSR_OSR_WEB_CONTENTS_VIEW_H_
+#endif  // ELECTRON_SHELL_BROWSER_OSR_OSR_WEB_CONTENTS_VIEW_H_

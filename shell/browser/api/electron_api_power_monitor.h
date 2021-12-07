@@ -2,8 +2,8 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_BROWSER_API_ELECTRON_API_POWER_MONITOR_H_
-#define SHELL_BROWSER_API_ELECTRON_API_POWER_MONITOR_H_
+#ifndef ELECTRON_SHELL_BROWSER_API_ELECTRON_API_POWER_MONITOR_H_
+#define ELECTRON_SHELL_BROWSER_API_ELECTRON_API_POWER_MONITOR_H_
 
 #include "base/power_monitor/power_observer.h"
 #include "gin/wrappable.h"
@@ -22,7 +22,8 @@ namespace api {
 class PowerMonitor : public gin::Wrappable<PowerMonitor>,
                      public gin_helper::EventEmitterMixin<PowerMonitor>,
                      public gin_helper::Pinnable<PowerMonitor>,
-                     public base::PowerObserver {
+                     public base::PowerStateObserver,
+                     public base::PowerSuspendObserver {
  public:
   static v8::Local<v8::Value> Create(v8::Isolate* isolate);
 
@@ -31,6 +32,10 @@ class PowerMonitor : public gin::Wrappable<PowerMonitor>,
   gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
       v8::Isolate* isolate) override;
   const char* GetTypeName() override;
+
+  // disable copy
+  PowerMonitor(const PowerMonitor&) = delete;
+  PowerMonitor& operator=(const PowerMonitor&) = delete;
 
  private:
   explicit PowerMonitor(v8::Isolate* isolate);
@@ -47,8 +52,10 @@ class PowerMonitor : public gin::Wrappable<PowerMonitor>,
   void InitPlatformSpecificMonitors();
 #endif
 
-  // base::PowerObserver implementations:
+  // base::PowerStateObserver implementations:
   void OnPowerStateChange(bool on_battery_power) override;
+
+  // base::PowerSuspendObserver implementations:
   void OnSuspend() override;
   void OnResume() override;
 
@@ -77,12 +84,10 @@ class PowerMonitor : public gin::Wrappable<PowerMonitor>,
 #if defined(OS_LINUX)
   PowerObserverLinux power_observer_linux_{this};
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(PowerMonitor);
 };
 
 }  // namespace api
 
 }  // namespace electron
 
-#endif  // SHELL_BROWSER_API_ELECTRON_API_POWER_MONITOR_H_
+#endif  // ELECTRON_SHELL_BROWSER_API_ELECTRON_API_POWER_MONITOR_H_

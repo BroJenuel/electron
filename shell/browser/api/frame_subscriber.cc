@@ -9,6 +9,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "media/capture/mojom/video_capture_buffer.mojom.h"
 #include "media/capture/mojom/video_capture_types.mojom.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "ui/gfx/geometry/size_conversions.h"
@@ -26,8 +27,7 @@ FrameSubscriber::FrameSubscriber(content::WebContents* web_contents,
                                  bool only_dirty)
     : content::WebContentsObserver(web_contents),
       callback_(callback),
-      only_dirty_(only_dirty),
-      weak_ptr_factory_(this) {
+      only_dirty_(only_dirty) {
   content::RenderViewHost* rvh = web_contents->GetRenderViewHost();
   if (rvh)
     AttachToHost(rvh->GetWidget());
@@ -51,8 +51,7 @@ void FrameSubscriber::AttachToHost(content::RenderWidgetHost* host) {
   video_capturer_->SetMinSizeChangePeriod(base::TimeDelta());
   video_capturer_->SetFormat(media::PIXEL_FORMAT_ARGB,
                              gfx::ColorSpace::CreateREC709());
-  video_capturer_->SetMinCapturePeriod(base::TimeDelta::FromSeconds(1) /
-                                       kMaxFrameRate);
+  video_capturer_->SetMinCapturePeriod(base::Seconds(1) / kMaxFrameRate);
   video_capturer_->Start(this);
 }
 
@@ -63,9 +62,10 @@ void FrameSubscriber::DetachFromHost() {
   host_ = nullptr;
 }
 
-void FrameSubscriber::RenderViewCreated(content::RenderViewHost* host) {
+void FrameSubscriber::RenderFrameCreated(
+    content::RenderFrameHost* render_frame_host) {
   if (!host_)
-    AttachToHost(host->GetWidget());
+    AttachToHost(render_frame_host->GetRenderWidgetHost());
 }
 
 void FrameSubscriber::RenderViewDeleted(content::RenderViewHost* host) {

@@ -23,7 +23,7 @@
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.developer-tools</string>
     <key>LSMinimumSystemVersion</key>
-    <string>10.10.0</string>
+    <string>${MACOSX_DEPLOYMENT_TARGET}</string>
     <key>NSMainNibFile</key>
     <string>MainMenu</string>
     <key>NSPrincipalClass</key>
@@ -49,5 +49,15 @@
     <string>This app needs access to Bluetooth</string>
     <key>NSBluetoothPeripheralUsageDescription</key>
     <string>This app needs access to Bluetooth</string>
+    <key>ElectronAsarIntegrity</key>
+    <dict>
+      <key>Resources/default_app.asar</key>
+      <dict>
+        <key>algorithm</key>
+        <string>SHA256</string>
+        <key>hash</key>
+        <string>${DEFAULT_APP_ASAR_HEADER_SHA}</string>
+      </dict>
+    </dict>
   </dict>
 </plist>

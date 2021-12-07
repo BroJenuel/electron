@@ -9,6 +9,7 @@ import { BrowserWindow, WebPreferences } from 'electron/main';
 import { closeWindow } from './window-helpers';
 import { AddressInfo } from 'net';
 import { emittedUntil } from './events-helpers';
+import { delay } from './spec-helpers';
 
 const messageContainsSecurityWarning = (event: Event, level: number, message: string) => {
   return message.indexOf('Electron Security Warning') > -1;
@@ -48,14 +49,16 @@ describe('security warnings', () => {
             return;
           }
 
-          const cspHeaders = { 'Content-Security-Policy': 'script-src \'self\' \'unsafe-inline\'' };
-          response.writeHead(200, useCsp ? cspHeaders : undefined);
+          const cspHeaders = [
+            ...(useCsp ? ['script-src \'self\' \'unsafe-inline\''] : [])
+          ];
+          response.writeHead(200, { 'Content-Security-Policy': cspHeaders });
           response.write(file, 'binary');
           response.end();
         });
       });
     }).listen(0, '127.0.0.1', () => {
-      serverUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      serverUrl = `http://localhost2:${(server.address() as AddressInfo).port}`;
       done();
     });
   });
@@ -76,7 +79,8 @@ describe('security warnings', () => {
     w = new BrowserWindow({
       show: false,
       webPreferences: {
-        nodeIntegration: true
+        nodeIntegration: true,
+        contextIsolation: false
       }
     });
 
@@ -117,16 +121,29 @@ describe('security warnings', () => {
       it('should warn about insecure Content-Security-Policy', async () => {
         w = new BrowserWindow({
           show: false,
-          webPreferences: {
-            enableRemoteModule: false,
-            ...webPreferences
-          }
+          webPreferences
         });
 
         useCsp = false;
         w.loadURL(`${serverUrl}/base-page-security.html`);
         const [,, message] = await emittedUntil(w.webContents, 'console-message', messageContainsSecurityWarning);
         expect(message).to.include('Insecure Content-Security-Policy');
+      });
+
+      it('should not warn about secure Content-Security-Policy', async () => {
+        w = new BrowserWindow({
+          show: false,
+          webPreferences
+        });
+
+        useCsp = true;
+        w.loadURL(`${serverUrl}/base-page-security.html`);
+        let didNotWarn = true;
+        w.webContents.on('console-message', () => {
+          didNotWarn = false;
+        });
+        await delay(500);
+        expect(didNotWarn).to.equal(true);
       });
 
       it('should warn about allowRunningInsecureContent', async () => {
@@ -185,7 +202,7 @@ describe('security warnings', () => {
       it('should warn about insecure resources', async () => {
         w = new BrowserWindow({
           show: false,
-          webPreferences: { ...webPreferences }
+          webPreferences
         });
 
         w.loadURL(`${serverUrl}/insecure-resources.html`);
@@ -203,30 +220,9 @@ describe('security warnings', () => {
         const [,, message] = await emittedUntil(w.webContents, 'console-message', messageContainsSecurityWarning);
         expect(message).to.not.include('insecure-resources.html');
       });
-
-      it('should warn about enabled remote module with remote content', async () => {
-        w = new BrowserWindow({
-          show: false,
-          webPreferences
-        });
-
-        w.loadURL(`${serverUrl}/base-page-security.html`);
-        const [,, message] = await emittedUntil(w.webContents, 'console-message', messageContainsSecurityWarning);
-        expect(message).to.include('enableRemoteModule');
-      });
-
-      it('should not warn about enabled remote module with remote content from localhost', async () => {
-        w = new BrowserWindow({
-          show: false,
-          webPreferences
-        });
-        w.loadURL(`${serverUrl}/base-page-security-onload-message.html`);
-        const [,, message] = await emittedUntil(w.webContents, 'console-message', isLoaded);
-        expect(message).to.not.include('enableRemoteModule');
-      });
     });
   };
 
-  generateSpecs('without sandbox', {});
-  generateSpecs('with sandbox', { sandbox: true });
+  generateSpecs('without sandbox', { contextIsolation: false });
+  generateSpecs('with sandbox', { sandbox: true, contextIsolation: false });
 });

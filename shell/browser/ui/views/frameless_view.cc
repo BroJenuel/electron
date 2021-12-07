@@ -38,12 +38,19 @@ int FramelessView::ResizingBorderHitTest(const gfx::Point& point) {
   bool can_ever_resize = frame_->widget_delegate()
                              ? frame_->widget_delegate()->CanResize()
                              : false;
+
+  // https://github.com/electron/electron/issues/611
+  // If window isn't resizable, we should always return HTNOWHERE, otherwise the
+  // hover state of DOM will not be cleared probably.
+  if (!can_ever_resize)
+    return HTNOWHERE;
+
   // Don't allow overlapping resize handles when the window is maximized or
   // fullscreen, as it can't be resized in those states.
   int resize_border = frame_->IsMaximized() || frame_->IsFullscreen()
                           ? 0
                           : kResizeInsideBoundsSize;
-  return GetHTComponentForFrame(point, resize_border, resize_border,
+  return GetHTComponentForFrame(point, gfx::Insets(resize_border),
                                 kResizeAreaCornerSize, kResizeAreaCornerSize,
                                 can_ever_resize);
 }
@@ -78,16 +85,16 @@ int FramelessView::NonClientHitTest(const gfx::Point& cursor) {
       return HTCAPTION;
   }
 
+  // Support resizing frameless window by dragging the border.
+  int frame_component = ResizingBorderHitTest(cursor);
+  if (frame_component != HTNOWHERE)
+    return frame_component;
+
   // Check for possible draggable region in the client area for the frameless
   // window.
   SkRegion* draggable_region = window_->draggable_region();
   if (draggable_region && draggable_region->contains(cursor.x(), cursor.y()))
     return HTCAPTION;
-
-  // Support resizing frameless window by dragging the border.
-  int frame_component = ResizingBorderHitTest(cursor);
-  if (frame_component != HTNOWHERE)
-    return frame_component;
 
   return HTCLIENT;
 }
@@ -114,7 +121,10 @@ gfx::Size FramelessView::GetMinimumSize() const {
 }
 
 gfx::Size FramelessView::GetMaximumSize() const {
-  return window_->GetContentMaximumSize();
+  gfx::Size size = window_->GetContentMaximumSize();
+  // Electron public APIs returns (0, 0) when maximum size is not set, but it
+  // would break internal window APIs like HWNDMessageHandler::SetAspectRatio.
+  return size.IsEmpty() ? gfx::Size(INT_MAX, INT_MAX) : size;
 }
 
 const char* FramelessView::GetClassName() const {

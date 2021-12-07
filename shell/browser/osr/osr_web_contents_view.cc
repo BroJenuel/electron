@@ -6,15 +6,15 @@
 
 #include "content/browser/web_contents/web_contents_impl.h"  // nogncheck
 #include "content/public/browser/render_view_host.h"
-#include "third_party/blink/public/common/widget/screen_info.h"
 #include "ui/display/screen.h"
+#include "ui/display/screen_info.h"
 
 namespace electron {
 
 OffScreenWebContentsView::OffScreenWebContentsView(
     bool transparent,
     const OnPaintCallback& callback)
-    : native_window_(nullptr), transparent_(transparent), callback_(callback) {
+    : transparent_(transparent), callback_(callback) {
 #if defined(OS_MAC)
   PlatformCreate();
 #endif
@@ -139,7 +139,7 @@ OffScreenWebContentsView::CreateViewForChildWidget(
                                            render_widget_host, view, GetSize());
 }
 
-void OffScreenWebContentsView::SetPageTitle(const base::string16& title) {}
+void OffScreenWebContentsView::SetPageTitle(const std::u16string& title) {}
 
 void OffScreenWebContentsView::RenderViewReady() {
   if (GetView())
@@ -151,6 +151,8 @@ void OffScreenWebContentsView::RenderViewHostChanged(
     content::RenderViewHost* new_host) {}
 
 void OffScreenWebContentsView::SetOverscrollControllerEnabled(bool enabled) {}
+
+void OffScreenWebContentsView::OnCapturerCountChanged() {}
 
 #if defined(OS_MAC)
 bool OffScreenWebContentsView::CloseTabAfterEventTrackingIfNeeded() {
@@ -171,7 +173,7 @@ void OffScreenWebContentsView::StartDragging(
 }
 
 void OffScreenWebContentsView::UpdateDragCursor(
-    blink::DragOperation operation) {}
+    ui::mojom::DragOperation operation) {}
 
 void OffScreenWebContentsView::SetPainting(bool painting) {
   auto* view = GetView();

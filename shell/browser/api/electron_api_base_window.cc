@@ -76,8 +76,7 @@ v8::Local<v8::Value> ToBuffer(v8::Isolate* isolate, void* val, int size) {
 }  // namespace
 
 BaseWindow::BaseWindow(v8::Isolate* isolate,
-                       const gin_helper::Dictionary& options)
-    : weak_factory_(this) {
+                       const gin_helper::Dictionary& options) {
   // The parent window.
   gin::Handle<BaseWindow> parent;
   if (options.Get("parent", &parent) && !parent.IsEmpty())
@@ -99,13 +98,9 @@ BaseWindow::BaseWindow(v8::Isolate* isolate,
   window_->AddObserver(this);
 
 #if defined(TOOLKIT_VIEWS)
-  {
-    v8::TryCatch try_catch(isolate);
-    gin::Handle<NativeImage> icon;
-    if (options.Get(options::kIcon, &icon) && !icon.IsEmpty())
-      SetIcon(icon);
-    if (try_catch.HasCaught())
-      LOG(ERROR) << "Failed to convert NativeImage";
+  v8::Local<v8::Value> icon;
+  if (options.Get(options::kIcon, &icon)) {
+    SetIconImpl(isolate, icon, NativeImage::OnConvertError::kWarn);
   }
 #endif
 }
@@ -119,8 +114,7 @@ BaseWindow::BaseWindow(gin_helper::Arguments* args,
 }
 
 BaseWindow::~BaseWindow() {
-  if (!window_->IsClosed())
-    window_->CloseImmediately();
+  CloseImmediately();
 
   // Destroy the native window in next tick because the native code might be
   // iterating all windows.
@@ -212,8 +206,15 @@ void BaseWindow::OnWindowRestore() {
 }
 
 void BaseWindow::OnWindowWillResize(const gfx::Rect& new_bounds,
+                                    const gfx::ResizeEdge& edge,
                                     bool* prevent_default) {
-  if (Emit("will-resize", new_bounds)) {
+  v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+  v8::Locker locker(isolate);
+  v8::HandleScope handle_scope(isolate);
+  gin_helper::Dictionary info = gin::Dictionary::CreateEmpty(isolate);
+  info.Set("edge", edge);
+
+  if (Emit("will-resize", new_bounds, info)) {
     *prevent_default = true;
   }
 }
@@ -321,6 +322,11 @@ void BaseWindow::SetContentView(gin::Handle<View> view) {
   ResetBrowserViews();
   content_view_.Reset(isolate(), view.ToV8());
   window_->SetContentView(view->view());
+}
+
+void BaseWindow::CloseImmediately() {
+  if (!window_->IsClosed())
+    window_->CloseImmediately();
 }
 
 void BaseWindow::Close() {
@@ -697,6 +703,10 @@ void BaseWindow::SetFocusable(bool focusable) {
   return window_->SetFocusable(focusable);
 }
 
+bool BaseWindow::IsFocusable() {
+  return window_->IsFocusable();
+}
+
 void BaseWindow::SetMenu(v8::Isolate* isolate, v8::Local<v8::Value> value) {
   auto context = isolate->GetCurrentContext();
   gin::Handle<Menu> menu;
@@ -758,10 +768,16 @@ void BaseWindow::AddBrowserView(v8::Local<v8::Value> value) {
       gin::ConvertFromV8(isolate(), value, &browser_view)) {
     auto get_that_view = browser_views_.find(browser_view->ID());
     if (get_that_view == browser_views_.end()) {
-      if (browser_view->web_contents()) {
-        window_->AddBrowserView(browser_view->view());
-        browser_view->web_contents()->SetOwnerWindow(window_.get());
+      // If we're reparenting a BrowserView, ensure that it's detached from
+      // its previous owner window.
+      auto* owner_window = browser_view->owner_window();
+      if (owner_window && owner_window != window_.get()) {
+        owner_window->RemoveBrowserView(browser_view->view());
+        browser_view->SetOwnerWindow(nullptr);
       }
+
+      window_->AddBrowserView(browser_view->view());
+      browser_view->SetOwnerWindow(window_.get());
       browser_views_[browser_view->ID()].Reset(isolate(), value);
     }
   }
@@ -773,13 +789,28 @@ void BaseWindow::RemoveBrowserView(v8::Local<v8::Value> value) {
       gin::ConvertFromV8(isolate(), value, &browser_view)) {
     auto get_that_view = browser_views_.find(browser_view->ID());
     if (get_that_view != browser_views_.end()) {
-      if (browser_view->web_contents()) {
-        window_->RemoveBrowserView(browser_view->view());
-        browser_view->web_contents()->SetOwnerWindow(nullptr);
-      }
+      window_->RemoveBrowserView(browser_view->view());
+      browser_view->SetOwnerWindow(nullptr);
       (*get_that_view).second.Reset(isolate(), value);
       browser_views_.erase(get_that_view);
     }
+  }
+}
+
+void BaseWindow::SetTopBrowserView(v8::Local<v8::Value> value,
+                                   gin_helper::Arguments* args) {
+  gin::Handle<BrowserView> browser_view;
+  if (value->IsObject() &&
+      gin::ConvertFromV8(isolate(), value, &browser_view)) {
+    auto* owner_window = browser_view->owner_window();
+    auto get_that_view = browser_views_.find(browser_view->ID());
+    if (get_that_view == browser_views_.end() ||
+        (owner_window && owner_window != window_.get())) {
+      args->ThrowError("Given BrowserView is not attached to the window");
+      return;
+    }
+
+    window_->SetTopBrowserView(browser_view->view());
   }
 }
 
@@ -822,9 +853,13 @@ void BaseWindow::SetVisibleOnAllWorkspaces(bool visible,
                                            gin_helper::Arguments* args) {
   gin_helper::Dictionary options;
   bool visibleOnFullScreen = false;
+  bool skipTransformProcessType = false;
   args->GetNext(&options) &&
       options.Get("visibleOnFullScreen", &visibleOnFullScreen);
-  return window_->SetVisibleOnAllWorkspaces(visible, visibleOnFullScreen);
+  args->GetNext(&options) &&
+      options.Get("skipTransformProcessType", &skipTransformProcessType);
+  return window_->SetVisibleOnAllWorkspaces(visible, visibleOnFullScreen,
+                                            skipTransformProcessType);
 }
 
 bool BaseWindow::IsVisibleOnAllWorkspaces() {
@@ -841,10 +876,22 @@ void BaseWindow::SetVibrancy(v8::Isolate* isolate, v8::Local<v8::Value> value) {
 }
 
 #if defined(OS_MAC)
+std::string BaseWindow::GetAlwaysOnTopLevel() {
+  return window_->GetAlwaysOnTopLevel();
+}
+
+void BaseWindow::SetWindowButtonVisibility(bool visible) {
+  window_->SetWindowButtonVisibility(visible);
+}
+
+bool BaseWindow::GetWindowButtonVisibility() const {
+  return window_->GetWindowButtonVisibility();
+}
+
 void BaseWindow::SetTrafficLightPosition(const gfx::Point& position) {
-  // For backward compatibility we treat (0, 0) as reseting to default.
+  // For backward compatibility we treat (0, 0) as resetting to default.
   if (position.IsOrigin())
-    window_->SetTrafficLightPosition(base::nullopt);
+    window_->SetTrafficLightPosition(absl::nullopt);
   else
     window_->SetTrafficLightPosition(position);
 }
@@ -892,13 +939,6 @@ void BaseWindow::AddTabbedWindow(NativeWindow* window,
                                  gin_helper::Arguments* args) {
   if (!window_->AddTabbedWindow(window))
     args->ThrowError("AddTabbedWindow cannot be called by a window on itself.");
-}
-
-void BaseWindow::SetWindowButtonVisibility(bool visible,
-                                           gin_helper::Arguments* args) {
-  if (!window_->SetWindowButtonVisibility(visible)) {
-    args->ThrowError("Not supported for this window");
-  }
 }
 
 void BaseWindow::SetAutoHideMenuBar(bool auto_hide) {
@@ -1003,14 +1043,25 @@ bool BaseWindow::SetThumbarButtons(gin_helper::Arguments* args) {
 }
 
 #if defined(TOOLKIT_VIEWS)
-void BaseWindow::SetIcon(gin::Handle<NativeImage> icon) {
+void BaseWindow::SetIcon(v8::Isolate* isolate, v8::Local<v8::Value> icon) {
+  SetIconImpl(isolate, icon, NativeImage::OnConvertError::kThrow);
+}
+
+void BaseWindow::SetIconImpl(v8::Isolate* isolate,
+                             v8::Local<v8::Value> icon,
+                             NativeImage::OnConvertError on_error) {
+  NativeImage* native_image = nullptr;
+  if (!NativeImage::TryConvertNativeImage(isolate, icon, &native_image,
+                                          on_error))
+    return;
+
 #if defined(OS_WIN)
   static_cast<NativeWindowViews*>(window_.get())
-      ->SetIcon(icon->GetHICON(GetSystemMetrics(SM_CXSMICON)),
-                icon->GetHICON(GetSystemMetrics(SM_CXICON)));
+      ->SetIcon(native_image->GetHICON(GetSystemMetrics(SM_CXSMICON)),
+                native_image->GetHICON(GetSystemMetrics(SM_CXICON)));
 #elif defined(OS_LINUX)
   static_cast<NativeWindowViews*>(window_.get())
-      ->SetIcon(icon->image().AsImageSkia());
+      ->SetIcon(native_image->image().AsImageSkia());
 #endif
 }
 #endif
@@ -1047,11 +1098,11 @@ bool BaseWindow::SetThumbnailToolTip(const std::string& tooltip) {
 }
 
 void BaseWindow::SetAppDetails(const gin_helper::Dictionary& options) {
-  base::string16 app_id;
+  std::wstring app_id;
   base::FilePath app_icon_path;
   int app_icon_index = 0;
-  base::string16 relaunch_command;
-  base::string16 relaunch_display_name;
+  std::wstring relaunch_command;
+  std::wstring relaunch_display_name;
 
   options.Get("appId", &app_id);
   options.Get("appIconPath", &app_icon_path);
@@ -1070,15 +1121,20 @@ int32_t BaseWindow::GetID() const {
 }
 
 void BaseWindow::ResetBrowserViews() {
+  v8::HandleScope scope(isolate());
+
   for (auto& item : browser_views_) {
     gin::Handle<BrowserView> browser_view;
     if (gin::ConvertFromV8(isolate(),
                            v8::Local<v8::Value>::New(isolate(), item.second),
                            &browser_view) &&
         !browser_view.IsEmpty()) {
-      if (browser_view->web_contents()) {
-        window_->RemoveBrowserView(browser_view->view());
-        browser_view->web_contents()->SetOwnerWindow(nullptr);
+      // There's a chance that the BrowserView may have been reparented - only
+      // reset if the owner window is *this* window.
+      auto* owner_window = browser_view->owner_window();
+      if (owner_window && owner_window == window_.get()) {
+        browser_view->SetOwnerWindow(nullptr);
+        owner_window->RemoveBrowserView(browser_view->view());
       }
     }
 
@@ -1194,12 +1250,14 @@ void BaseWindow::BuildPrototype(v8::Isolate* isolate,
       .SetMethod("setIgnoreMouseEvents", &BaseWindow::SetIgnoreMouseEvents)
       .SetMethod("setContentProtection", &BaseWindow::SetContentProtection)
       .SetMethod("setFocusable", &BaseWindow::SetFocusable)
+      .SetMethod("isFocusable", &BaseWindow::IsFocusable)
       .SetMethod("setMenu", &BaseWindow::SetMenu)
       .SetMethod("removeMenu", &BaseWindow::RemoveMenu)
       .SetMethod("setParentWindow", &BaseWindow::SetParentWindow)
       .SetMethod("setBrowserView", &BaseWindow::SetBrowserView)
       .SetMethod("addBrowserView", &BaseWindow::AddBrowserView)
       .SetMethod("removeBrowserView", &BaseWindow::RemoveBrowserView)
+      .SetMethod("setTopBrowserView", &BaseWindow::SetTopBrowserView)
       .SetMethod("getMediaSourceId", &BaseWindow::GetMediaSourceId)
       .SetMethod("getNativeWindowHandle", &BaseWindow::GetNativeWindowHandle)
       .SetMethod("setProgressBar", &BaseWindow::SetProgressBar)
@@ -1209,6 +1267,7 @@ void BaseWindow::BuildPrototype(v8::Isolate* isolate,
       .SetMethod("isVisibleOnAllWorkspaces",
                  &BaseWindow::IsVisibleOnAllWorkspaces)
 #if defined(OS_MAC)
+      .SetMethod("_getAlwaysOnTopLevel", &BaseWindow::GetAlwaysOnTopLevel)
       .SetMethod("setAutoHideCursor", &BaseWindow::SetAutoHideCursor)
 #endif
       .SetMethod("setVibrancy", &BaseWindow::SetVibrancy)
@@ -1230,6 +1289,8 @@ void BaseWindow::BuildPrototype(v8::Isolate* isolate,
       .SetMethod("addTabbedWindow", &BaseWindow::AddTabbedWindow)
       .SetMethod("setWindowButtonVisibility",
                  &BaseWindow::SetWindowButtonVisibility)
+      .SetMethod("_getWindowButtonVisibility",
+                 &BaseWindow::GetWindowButtonVisibility)
       .SetProperty("excludedFromShownWindowsMenu",
                    &BaseWindow::IsExcludedFromShownWindowsMenu,
                    &BaseWindow::SetExcludedFromShownWindowsMenu)

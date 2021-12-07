@@ -63,18 +63,26 @@ These methods can be accessed from the `webFrameMain` module:
   instances (`frame.routingId`) and are also passed by frame
   specific `WebContents` navigation events (e.g. `did-frame-navigate`).
 
-Returns `WebFrameMain` - A frame with the given process and routing IDs.
+Returns `WebFrameMain | undefined` - A frame with the given process and routing IDs,
+or `undefined` if there is no WebFrameMain associated with the given IDs.
 
 ## Class: WebFrameMain
 
-Process: [Main](../glossary.md#main-process)
+Process: [Main](../glossary.md#main-process)<br />
+_This class is not exported from the `'electron'` module. It is only available as a return value of other methods in the Electron API._
+
+### Instance Events
+
+#### Event: 'dom-ready'
+
+Emitted when the document is loaded.
 
 ### Instance Methods
 
 #### `frame.executeJavaScript(code[, userGesture])`
 
-* `code` String
-* `userGesture` Boolean (optional) - Default is `false`.
+* `code` string
+* `userGesture` boolean (optional) - Default is `false`.
 
 Returns `Promise<unknown>` - A promise that resolves with the result of the executed
 code or is rejected if execution throws or results in a rejected promise.
@@ -88,6 +96,47 @@ this limitation.
 #### `frame.reload()`
 
 Returns `boolean` - Whether the reload was initiated successfully. Only results in `false` when the frame has no history.
+
+#### `frame.send(channel, ...args)`
+
+* `channel` string
+* `...args` any[]
+
+Send an asynchronous message to the renderer process via `channel`, along with
+arguments. Arguments will be serialized with the [Structured Clone
+Algorithm][SCA], just like [`postMessage`][], so prototype chains will not be
+included. Sending Functions, Promises, Symbols, WeakMaps, or WeakSets will
+throw an exception.
+
+The renderer process can handle the message by listening to `channel` with the
+[`ipcRenderer`](ipc-renderer.md) module.
+
+#### `frame.postMessage(channel, message, [transfer])`
+
+* `channel` string
+* `message` any
+* `transfer` MessagePortMain[] (optional)
+
+Send a message to the renderer process, optionally transferring ownership of
+zero or more [`MessagePortMain`][] objects.
+
+The transferred `MessagePortMain` objects will be available in the renderer
+process by accessing the `ports` property of the emitted event. When they
+arrive in the renderer, they will be native DOM `MessagePort` objects.
+
+For example:
+
+```js
+// Main process
+const { port1, port2 } = new MessageChannelMain()
+webContents.mainFrame.postMessage('port', { message: 'hello' }, [port1])
+
+// Renderer process
+ipcRenderer.on('port', (e, msg) => {
+  const [port] = e.ports
+  // ...
+})
+```
 
 ### Instance Properties
 
@@ -124,7 +173,7 @@ not used again.
 
 #### `frame.name` _Readonly_
 
-A `String` representing the frame name.
+A `string` representing the frame name.
 
 #### `frame.osProcessId` _Readonly_
 
@@ -140,3 +189,9 @@ This is not the same as the OS process ID; to read that use `frame.osProcessId`.
 An `Integer` representing the unique frame id in the current renderer process.
 Distinct `WebFrameMain` instances that refer to the same underlying frame will
 have the same `routingId`.
+
+#### `frame.visibilityState` _Readonly_
+
+A `string` representing the [visibility state](https://developer.mozilla.org/en-US/docs/Web/API/Document/visibilityState) of the frame.
+
+See also how the [Page Visibility API](browser-window.md#page-visibility) is affected by other Electron APIs.

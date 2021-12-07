@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "media/base/video_frame_metadata.h"
+#include "media/capture/mojom/video_capture_buffer.mojom.h"
 #include "media/capture/mojom/video_capture_types.mojom.h"
 #include "shell/browser/osr/osr_render_widget_host_view.h"
 #include "ui/gfx/skbitmap_operations.h"
@@ -18,8 +19,7 @@ OffScreenVideoConsumer::OffScreenVideoConsumer(
     OnPaintCallback callback)
     : callback_(callback),
       view_(view),
-      video_capturer_(view->CreateVideoCapturer()),
-      weak_ptr_factory_(this) {
+      video_capturer_(view->CreateVideoCapturer()) {
   video_capturer_->SetResolutionConstraints(view_->SizeInPixels(),
                                             view_->SizeInPixels(), true);
   video_capturer_->SetAutoThrottlingEnabled(false);
@@ -40,8 +40,7 @@ void OffScreenVideoConsumer::SetActive(bool active) {
 }
 
 void OffScreenVideoConsumer::SetFrameRate(int frame_rate) {
-  video_capturer_->SetMinCapturePeriod(base::TimeDelta::FromSeconds(1) /
-                                       frame_rate);
+  video_capturer_->SetMinCapturePeriod(base::Seconds(1) / frame_rate);
 }
 
 void OffScreenVideoConsumer::SizeChanged() {
@@ -112,7 +111,7 @@ void OffScreenVideoConsumer::OnFrameCaptured(
       new FramePinner{std::move(mapping), callbacks_remote.Unbind()});
   bitmap.setImmutable();
 
-  base::Optional<gfx::Rect> update_rect = info->metadata.capture_update_rect;
+  absl::optional<gfx::Rect> update_rect = info->metadata.capture_update_rect;
   if (!update_rect.has_value() || update_rect->IsEmpty()) {
     update_rect = content_rect;
   }

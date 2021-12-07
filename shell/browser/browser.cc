@@ -14,6 +14,7 @@
 #include "base/run_loop.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "chrome/common/chrome_paths.h"
 #include "shell/browser/browser_observer.h"
 #include "shell/browser/electron_browser_main_parts.h"
 #include "shell/browser/login_handler.h"
@@ -64,12 +65,24 @@ Browser* Browser::Get() {
   return ElectronBrowserMainParts::Get()->browser();
 }
 
+#if defined(OS_WIN) || defined(OS_LINUX)
+void Browser::Focus(gin::Arguments* args) {
+  // Focus on the first visible window.
+  for (auto* const window : WindowList::GetWindows()) {
+    if (window->IsVisible()) {
+      window->Focus(true);
+      break;
+    }
+  }
+}
+#endif
+
 void Browser::Quit() {
-  if (is_quiting_)
+  if (is_quitting_)
     return;
 
-  is_quiting_ = HandleBeforeQuit();
-  if (!is_quiting_)
+  is_quitting_ = HandleBeforeQuit();
+  if (!is_quitting_)
     return;
 
   if (electron::WindowList::IsEmpty())
@@ -87,7 +100,7 @@ void Browser::Exit(gin::Arguments* args) {
     exit(code);
   } else {
     // Prepare to quit when all windows have been closed.
-    is_quiting_ = true;
+    is_quitting_ = true;
 
     // Remember this caller so that we don't emit unrelated events.
     is_exiting_ = true;
@@ -108,7 +121,7 @@ void Browser::Shutdown() {
     return;
 
   is_shutdown_ = true;
-  is_quiting_ = true;
+  is_quitting_ = true;
 
   for (BrowserObserver& observer : observers_)
     observer.OnQuit();
@@ -123,25 +136,25 @@ void Browser::Shutdown() {
 }
 
 std::string Browser::GetVersion() const {
-  std::string ret = GetOverriddenApplicationVersion();
+  std::string ret = OverriddenApplicationVersion();
   if (ret.empty())
     ret = GetExecutableFileVersion();
   return ret;
 }
 
 void Browser::SetVersion(const std::string& version) {
-  OverrideApplicationVersion(version);
+  OverriddenApplicationVersion() = version;
 }
 
 std::string Browser::GetName() const {
-  std::string ret = GetOverriddenApplicationName();
+  std::string ret = OverriddenApplicationName();
   if (ret.empty())
     ret = GetExecutableFileProductName();
   return ret;
 }
 
 void Browser::SetName(const std::string& name) {
-  OverrideApplicationName(name);
+  OverriddenApplicationName() = name;
 }
 
 int Browser::GetBadgeCount() {
@@ -175,7 +188,7 @@ void Browser::DidFinishLaunching(base::DictionaryValue launch_info) {
   // Make sure the userData directory is created.
   base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::FilePath user_data;
-  if (base::PathService::Get(DIR_USER_DATA, &user_data))
+  if (base::PathService::Get(chrome::DIR_USER_DATA, &user_data))
     base::CreateDirectoryAndGetError(user_data, nullptr);
 
   is_ready_ = true;
@@ -229,7 +242,7 @@ void Browser::NotifyAndShutdown() {
     observer.OnWillQuit(&prevent_default);
 
   if (prevent_default) {
-    is_quiting_ = false;
+    is_quitting_ = false;
     return;
   }
 
@@ -245,16 +258,16 @@ bool Browser::HandleBeforeQuit() {
 }
 
 void Browser::OnWindowCloseCancelled(NativeWindow* window) {
-  if (is_quiting_)
+  if (is_quitting_)
     // Once a beforeunload handler has prevented the closing, we think the quit
     // is cancelled too.
-    is_quiting_ = false;
+    is_quitting_ = false;
 }
 
 void Browser::OnWindowAllClosed() {
   if (is_exiting_) {
     Shutdown();
-  } else if (is_quiting_) {
+  } else if (is_quitting_) {
     NotifyAndShutdown();
   } else {
     for (BrowserObserver& observer : observers_)

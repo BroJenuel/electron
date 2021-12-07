@@ -2,13 +2,12 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_BROWSER_LIB_POWER_OBSERVER_LINUX_H_
-#define SHELL_BROWSER_LIB_POWER_OBSERVER_LINUX_H_
+#ifndef ELECTRON_SHELL_BROWSER_LIB_POWER_OBSERVER_LINUX_H_
+#define ELECTRON_SHELL_BROWSER_LIB_POWER_OBSERVER_LINUX_H_
 
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/power_monitor/power_observer.h"
 #include "dbus/bus.h"
@@ -19,10 +18,14 @@ namespace electron {
 
 class PowerObserverLinux {
  public:
-  explicit PowerObserverLinux(base::PowerObserver* observer);
+  explicit PowerObserverLinux(base::PowerSuspendObserver* suspend_observer);
   ~PowerObserverLinux();
 
-  void SetShutdownHandler(base::Callback<bool()> should_shutdown);
+  // disable copy
+  PowerObserverLinux(const PowerObserverLinux&) = delete;
+  PowerObserverLinux& operator=(const PowerObserverLinux&) = delete;
+
+  void SetShutdownHandler(base::RepeatingCallback<bool()> should_shutdown);
 
  private:
   void BlockSleep();
@@ -39,17 +42,15 @@ class PowerObserverLinux {
                          bool success);
 
   base::RepeatingCallback<bool()> should_shutdown_;
-  base::PowerObserver* observer_;
+  base::PowerSuspendObserver* suspend_observer_ = nullptr;
 
   scoped_refptr<dbus::ObjectProxy> logind_;
   std::string lock_owner_name_;
   base::ScopedFD sleep_lock_;
   base::ScopedFD shutdown_lock_;
   base::WeakPtrFactory<PowerObserverLinux> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(PowerObserverLinux);
 };
 
 }  // namespace electron
 
-#endif  // SHELL_BROWSER_LIB_POWER_OBSERVER_LINUX_H_
+#endif  // ELECTRON_SHELL_BROWSER_LIB_POWER_OBSERVER_LINUX_H_

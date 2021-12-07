@@ -15,11 +15,13 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "net/base/mac/url_conversions.h"
+#include "shell/browser/badging/badge_manager.h"
 #include "shell/browser/mac/dict_util.h"
 #include "shell/browser/mac/electron_application.h"
 #include "shell/browser/mac/electron_application_delegate.h"
 #include "shell/browser/native_window.h"
 #include "shell/browser/window_list.h"
+#include "shell/common/api/electron_api_native_image.h"
 #include "shell/common/application_info.h"
 #include "shell/common/gin_converters/image_converter.h"
 #include "shell/common/gin_helper/arguments.h"
@@ -56,7 +58,7 @@ gfx::Image GetApplicationIconForProtocol(NSString* _Nonnull app_path) {
   return icon;
 }
 
-base::string16 GetAppDisplayNameForProtocol(NSString* app_path) {
+std::u16string GetAppDisplayNameForProtocol(NSString* app_path) {
   NSString* app_display_name =
       [[NSFileManager defaultManager] displayNameAtPath:app_path];
   return base::SysNSStringToUTF16(app_display_name);
@@ -79,8 +81,8 @@ v8::Local<v8::Promise> Browser::GetApplicationInfoForProtocol(
     return handle;
   }
 
-  base::string16 app_path = base::SysNSStringToUTF16(ns_app_path);
-  base::string16 app_display_name = GetAppDisplayNameForProtocol(ns_app_path);
+  std::u16string app_path = base::SysNSStringToUTF16(ns_app_path);
+  std::u16string app_display_name = GetAppDisplayNameForProtocol(ns_app_path);
   gfx::Image app_icon = GetApplicationIconForProtocol(ns_app_path);
 
   dict.Set("name", app_display_name);
@@ -91,7 +93,7 @@ v8::Local<v8::Promise> Browser::GetApplicationInfoForProtocol(
   return handle;
 }
 
-void Browser::SetShutdownHandler(base::Callback<bool()> handler) {
+void Browser::SetShutdownHandler(base::RepeatingCallback<bool()> handler) {
   [[AtomApplication sharedApplication] setShutdownHandler:std::move(handler)];
 }
 
@@ -207,20 +209,24 @@ bool Browser::IsDefaultProtocolClient(const std::string& protocol,
   return result == NSOrderedSame;
 }
 
-base::string16 Browser::GetApplicationNameForProtocol(const GURL& url) {
+std::u16string Browser::GetApplicationNameForProtocol(const GURL& url) {
   NSString* app_path = GetAppPathForProtocol(url);
   if (!app_path) {
-    return base::string16();
+    return std::u16string();
   }
-  base::string16 app_display_name = GetAppDisplayNameForProtocol(app_path);
+  std::u16string app_display_name = GetAppDisplayNameForProtocol(app_path);
   return app_display_name;
 }
 
-void Browser::SetAppUserModelID(const base::string16& name) {}
-
-bool Browser::SetBadgeCount(int count) {
-  DockSetBadgeText(count != 0 ? base::NumberToString(count) : "");
-  badge_count_ = count;
+bool Browser::SetBadgeCount(absl::optional<int> count) {
+  DockSetBadgeText(!count.has_value() || count.value() != 0
+                       ? badging::BadgeManager::GetBadgeString(count)
+                       : "");
+  if (count.has_value()) {
+    badge_count_ = count.value();
+  } else {
+    badge_count_ = 0;
+  }
   return true;
 }
 
@@ -271,10 +277,11 @@ void Browser::DidFailToContinueUserActivity(const std::string& type,
 }
 
 bool Browser::ContinueUserActivity(const std::string& type,
-                                   base::DictionaryValue user_info) {
+                                   base::DictionaryValue user_info,
+                                   base::DictionaryValue details) {
   bool prevent_default = false;
   for (BrowserObserver& observer : observers_)
-    observer.OnContinueUserActivity(&prevent_default, type, user_info);
+    observer.OnContinueUserActivity(&prevent_default, type, user_info, details);
   return prevent_default;
 }
 
@@ -396,7 +403,7 @@ void Browser::DockHide() {
   // immediately after DockShow. After some experiments, 1 second seems to be
   // a proper interval.
   if (!last_dock_show_.is_null() &&
-      base::Time::Now() - last_dock_show_ < base::TimeDelta::FromSeconds(1)) {
+      base::Time::Now() - last_dock_show_ < base::Seconds(1)) {
     return;
   }
 
@@ -454,7 +461,16 @@ void Browser::DockSetMenu(ElectronMenuModel* model) {
   [delegate setApplicationDockMenu:model];
 }
 
-void Browser::DockSetIcon(const gfx::Image& image) {
+void Browser::DockSetIcon(v8::Isolate* isolate, v8::Local<v8::Value> icon) {
+  gfx::Image image;
+
+  if (!icon->IsNull()) {
+    api::NativeImage* native_image = nullptr;
+    if (!api::NativeImage::TryConvertNativeImage(isolate, icon, &native_image))
+      return;
+    image = native_image->image();
+  }
+
   [[AtomApplication sharedApplication]
       setApplicationIconImage:image.AsNSImage()];
 }
@@ -485,11 +501,12 @@ void Browser::ShowAboutPanel() {
 void Browser::SetAboutPanelOptions(base::DictionaryValue options) {
   about_panel_options_.Clear();
 
-  for (auto& pair : options) {
-    std::string& key = pair.first;
-    if (!key.empty() && pair.second->is_string()) {
+  for (const auto pair : options.DictItems()) {
+    std::string key = std::string(pair.first);
+    if (!key.empty() && pair.second.is_string()) {
       key[0] = base::ToUpperASCII(key[0]);
-      about_panel_options_.Set(key, std::move(pair.second));
+      auto val = std::make_unique<base::Value>(pair.second.Clone());
+      about_panel_options_.Set(key, std::move(val));
     }
   }
 }

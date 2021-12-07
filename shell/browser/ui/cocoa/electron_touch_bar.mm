@@ -551,7 +551,7 @@ static NSString* const ImageScrubberItemIdentifier = @"scrubber.image.item";
 
   gin_helper::PersistentDictionary child;
   std::vector<gin_helper::PersistentDictionary> items;
-  if (settings.Get("child", &child) && child.Get("ordereredItems", &items)) {
+  if (settings.Get("child", &child) && child.Get("orderedItems", &items)) {
     item.popoverTouchBar =
         [self touchBarFromItemIdentifiers:[self identifiersFromSettings:items]];
   }
@@ -572,7 +572,7 @@ static NSString* const ImageScrubberItemIdentifier = @"scrubber.image.item";
   if (!settings.Get("child", &child))
     return nil;
   std::vector<gin_helper::PersistentDictionary> items;
-  if (!child.Get("ordereredItems", &items))
+  if (!child.Get("orderedItems", &items))
     return nil;
 
   NSMutableArray* generatedItems = [NSMutableArray array];
@@ -601,7 +601,7 @@ static NSString* const ImageScrubberItemIdentifier = @"scrubber.image.item";
   if (!settings.Get("child", &child))
     return;
   std::vector<gin_helper::PersistentDictionary> items;
-  if (!child.Get("ordereredItems", &items))
+  if (!child.Get("orderedItems", &items))
     return;
 
   item.groupTouchBar =
@@ -735,7 +735,10 @@ static NSString* const ImageScrubberItemIdentifier = @"scrubber.image.item";
 
   bool showsArrowButtons = false;
   settings.Get("showArrowButtons", &showsArrowButtons);
-  scrubber.showsArrowButtons = showsArrowButtons;
+  // The scrubber will crash if the user tries to scroll
+  // and there are no items.
+  if ([self numberOfItemsForScrubber:scrubber] > 0)
+    scrubber.showsArrowButtons = showsArrowButtons;
 
   std::string selectedStyle;
   std::string overlayStyle;

@@ -6,7 +6,6 @@
 
 #include <memory>
 #include <string>
-#include <utility>
 
 #include "base/containers/span.h"
 #include "base/strings/utf_string_conversions.h"
@@ -28,17 +27,15 @@
 
 namespace extensions {
 
-namespace keys = manifest_keys;
-namespace errors = manifest_errors;
-
 constexpr APIPermissionInfo::InitInfo permissions_to_register[] = {
-    {APIPermission::kDevtools, "devtools",
+    {mojom::APIPermissionID::kDevtools, "devtools",
      APIPermissionInfo::kFlagImpliesFullURLAccess |
          APIPermissionInfo::kFlagCannotBeOptional |
          APIPermissionInfo::kFlagInternal},
-    {APIPermission::kResourcesPrivate, "resourcesPrivate",
+    {mojom::APIPermissionID::kResourcesPrivate, "resourcesPrivate",
      APIPermissionInfo::kFlagCannotBeOptional},
-    {APIPermission::kManagement, "management"},
+    {mojom::APIPermissionID::kManagement, "management"},
+    {mojom::APIPermissionID::kCryptotokenPrivate, "cryptotokenPrivate"},
 };
 base::span<const APIPermissionInfo::InitInfo> GetPermissionInfos() {
   return base::make_span(permissions_to_register);

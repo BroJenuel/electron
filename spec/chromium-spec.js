@@ -22,6 +22,13 @@ describe('chromium feature', () => {
       expect(() => {
         navigator.setAppBadge(42);
       }).to.not.throw();
+      expect(() => {
+        // setAppBadge with no argument should show dot
+        navigator.setAppBadge();
+      }).to.not.throw();
+      expect(() => {
+        navigator.clearAppBadge();
+      }).to.not.throw();
     });
   });
 
@@ -84,7 +91,7 @@ describe('chromium feature', () => {
         slashes: true
       });
       const message = waitForEvent(window, 'message');
-      const b = window.open(windowUrl, '', 'nodeIntegration=no,show=no');
+      const b = window.open(windowUrl, '', 'nodeIntegration=no,contextIsolation=no,show=no');
       const event = await message;
       b.close();
       expect(event.data.isProcessGlobalUndefined).to.be.true();
@@ -100,7 +107,7 @@ describe('chromium feature', () => {
         slashes: true
       });
       const message = waitForEvent(window, 'message');
-      const b = window.open(windowUrl, '', 'webviewTag=no,nodeIntegration=yes,show=no');
+      const b = window.open(windowUrl, '', 'webviewTag=no,contextIsolation=no,nodeIntegration=yes,show=no');
       const event = await message;
       b.close();
       expect(event.data.isWebViewGlobalUndefined).to.be.true();
@@ -147,16 +154,6 @@ describe('chromium feature', () => {
     });
   });
 
-  describe('window.postMessage', () => {
-    it('throws an exception when the targetOrigin cannot be converted to a string', () => {
-      const b = window.open('');
-      expect(() => {
-        b.postMessage('test', { toString: null });
-      }).to.throw('Cannot convert object to primitive value');
-      b.close();
-    });
-  });
-
   describe('window.opener.postMessage', () => {
     it('sets source and origin correctly', async () => {
       const message = waitForEvent(window, 'message');
@@ -174,6 +171,7 @@ describe('chromium feature', () => {
       const webview = new WebView();
       const consoleMessage = waitForEvent(webview, 'console-message');
       webview.allowpopups = true;
+      webview.setAttribute('webpreferences', 'contextIsolation=no');
       webview.src = url.format({
         pathname: `${fixtures}/pages/webview-opener-postMessage.html`,
         protocol: 'file',
@@ -210,7 +208,7 @@ describe('chromium feature', () => {
 
       it('delivers messages that match the origin', async () => {
         const message = waitForEvent(window, 'message');
-        const b = window.open(serverURL, '', 'show=no');
+        const b = window.open(serverURL, '', 'show=no,contextIsolation=no,nodeIntegration=yes');
         const event = await message;
         b.close();
         expect(event.data).to.equal('deliver');
@@ -259,7 +257,7 @@ describe('chromium feature', () => {
       const webview = new WebView();
       const eventPromise = waitForEvent(webview, 'ipc-message');
       webview.src = `file://${fixtures}/pages/worker.html`;
-      webview.setAttribute('webpreferences', 'nodeIntegration, nodeIntegrationInWorker');
+      webview.setAttribute('webpreferences', 'nodeIntegration, nodeIntegrationInWorker, contextIsolation=no');
       document.body.appendChild(webview);
       const event = await eventPromise;
       webview.remove();

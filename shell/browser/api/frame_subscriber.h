@@ -2,8 +2,8 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_BROWSER_API_FRAME_SUBSCRIBER_H_
-#define SHELL_BROWSER_API_FRAME_SUBSCRIBER_H_
+#ifndef ELECTRON_SHELL_BROWSER_API_FRAME_SUBSCRIBER_H_
+#define ELECTRON_SHELL_BROWSER_API_FRAME_SUBSCRIBER_H_
 
 #include <memory>
 #include <string>
@@ -18,7 +18,8 @@
 
 namespace gfx {
 class Image;
-}
+class Rect;
+}  // namespace gfx
 
 namespace electron {
 
@@ -37,11 +38,15 @@ class FrameSubscriber : public content::WebContentsObserver,
                   bool only_dirty);
   ~FrameSubscriber() override;
 
+  // disable copy
+  FrameSubscriber(const FrameSubscriber&) = delete;
+  FrameSubscriber& operator=(const FrameSubscriber&) = delete;
+
  private:
   void AttachToHost(content::RenderWidgetHost* host);
   void DetachFromHost();
 
-  void RenderViewCreated(content::RenderViewHost* host) override;
+  void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
   void RenderViewDeleted(content::RenderViewHost* host) override;
   void RenderViewHostChanged(content::RenderViewHost* old_host,
                              content::RenderViewHost* new_host) override;
@@ -67,13 +72,11 @@ class FrameSubscriber : public content::WebContentsObserver,
   content::RenderWidgetHost* host_;
   std::unique_ptr<viz::ClientFrameSinkVideoCapturer> video_capturer_;
 
-  base::WeakPtrFactory<FrameSubscriber> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(FrameSubscriber);
+  base::WeakPtrFactory<FrameSubscriber> weak_ptr_factory_{this};
 };
 
 }  // namespace api
 
 }  // namespace electron
 
-#endif  // SHELL_BROWSER_API_FRAME_SUBSCRIBER_H_
+#endif  // ELECTRON_SHELL_BROWSER_API_FRAME_SUBSCRIBER_H_

@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_BROWSER_UI_GTK_APP_INDICATOR_ICON_H_
-#define SHELL_BROWSER_UI_GTK_APP_INDICATOR_ICON_H_
+#ifndef ELECTRON_SHELL_BROWSER_UI_GTK_APP_INDICATOR_ICON_H_
+#define ELECTRON_SHELL_BROWSER_UI_GTK_APP_INDICATOR_ICON_H_
 
 #include <memory>
 #include <string>
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/nix/xdg_util.h"
 #include "ui/base/glib/glib_signal.h"
@@ -41,15 +40,19 @@ class AppIndicatorIcon : public views::StatusIconLinux {
   // icons.
   AppIndicatorIcon(std::string id,
                    const gfx::ImageSkia& image,
-                   const base::string16& tool_tip);
+                   const std::u16string& tool_tip);
   ~AppIndicatorIcon() override;
+
+  // disable copy
+  AppIndicatorIcon(const AppIndicatorIcon&) = delete;
+  AppIndicatorIcon& operator=(const AppIndicatorIcon&) = delete;
 
   // Indicates whether libappindicator so could be opened.
   static bool CouldOpen();
 
   // Overridden from views::StatusIconLinux:
   void SetIcon(const gfx::ImageSkia& image) override;
-  void SetToolTip(const base::string16& tool_tip) override;
+  void SetToolTip(const std::u16string& tool_tip) override;
   void UpdatePlatformContextMenu(ui::MenuModel* menu) override;
   void RefreshPlatformContextMenu() override;
 
@@ -96,21 +99,19 @@ class AppIndicatorIcon : public views::StatusIconLinux {
   base::nix::DesktopEnvironment desktop_env_;
 
   // Gtk status icon wrapper
-  AppIndicator* icon_;
+  AppIndicator* icon_ = nullptr;
 
   std::unique_ptr<AppIndicatorIconMenu> menu_;
-  ui::MenuModel* menu_model_;
+  ui::MenuModel* menu_model_ = nullptr;
 
   base::FilePath temp_dir_;
-  int icon_change_count_;
+  int icon_change_count_ = 0;
 
   base::WeakPtrFactory<AppIndicatorIcon> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(AppIndicatorIcon);
 };
 
 }  // namespace gtkui
 
 }  // namespace electron
 
-#endif  // SHELL_BROWSER_UI_GTK_APP_INDICATOR_ICON_H_
+#endif  // ELECTRON_SHELL_BROWSER_UI_GTK_APP_INDICATOR_ICON_H_

@@ -18,8 +18,7 @@
 
 namespace electron {
 
-MenuDelegate::MenuDelegate(MenuBar* menu_bar)
-    : menu_bar_(menu_bar), id_(-1), hold_first_switch_(false) {}
+MenuDelegate::MenuDelegate(MenuBar* menu_bar) : menu_bar_(menu_bar) {}
 
 MenuDelegate::~MenuDelegate() = default;
 
@@ -71,12 +70,16 @@ bool MenuDelegate::GetAccelerator(int id, ui::Accelerator* accelerator) const {
   return adapter_->GetAccelerator(id, accelerator);
 }
 
-base::string16 MenuDelegate::GetLabel(int id) const {
+std::u16string MenuDelegate::GetLabel(int id) const {
   return adapter_->GetLabel(id);
 }
 
-void MenuDelegate::GetLabelStyle(int id, LabelStyle* style) const {
-  return adapter_->GetLabelStyle(id, style);
+const gfx::FontList* MenuDelegate::GetLabelFontList(int id) const {
+  return adapter_->GetLabelFontList(id);
+}
+
+absl::optional<SkColor> MenuDelegate::GetLabelColor(int id) const {
+  return adapter_->GetLabelColor(id);
 }
 
 bool MenuDelegate::IsCommandEnabled(int id) const {

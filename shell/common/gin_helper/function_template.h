@@ -2,19 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE.chromium file.
 
-#ifndef SHELL_COMMON_GIN_HELPER_FUNCTION_TEMPLATE_H_
-#define SHELL_COMMON_GIN_HELPER_FUNCTION_TEMPLATE_H_
+#ifndef ELECTRON_SHELL_COMMON_GIN_HELPER_FUNCTION_TEMPLATE_H_
+#define ELECTRON_SHELL_COMMON_GIN_HELPER_FUNCTION_TEMPLATE_H_
 
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/optional.h"
 #include "gin/arguments.h"
 #include "shell/common/gin_helper/arguments.h"
 #include "shell/common/gin_helper/destroyable.h"
 #include "shell/common/gin_helper/error_thrower.h"
 #include "shell/common/gin_helper/microtasks_scope.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 // This file is forked from gin/function_template.h with 2 differences:
 // 1. Support for additional types of arguments.
@@ -41,7 +41,8 @@ struct CallbackParamTraits<const T*> {
   typedef T* LocalType;
 };
 
-// CallbackHolder and CallbackHolderBase are used to pass a base::Callback from
+// CallbackHolder and CallbackHolderBase are used to pass a
+// base::RepeatingCallback from
 // CreateFunctionTemplate through v8 (via v8::FunctionTemplate) to
 // DispatchToCallback, where it is invoked.
 
@@ -50,6 +51,10 @@ struct CallbackParamTraits<const T*> {
 class CallbackHolderBase {
  public:
   v8::Local<v8::External> GetHandle(v8::Isolate* isolate);
+
+  // disable copy
+  CallbackHolderBase(const CallbackHolderBase&) = delete;
+  CallbackHolderBase& operator=(const CallbackHolderBase&) = delete;
 
  protected:
   explicit CallbackHolderBase(v8::Isolate* isolate);
@@ -62,24 +67,20 @@ class CallbackHolderBase {
       const v8::WeakCallbackInfo<CallbackHolderBase>& data);
 
   v8::Global<v8::External> v8_ref_;
-
-  DISALLOW_COPY_AND_ASSIGN(CallbackHolderBase);
 };
 
 template <typename Sig>
 class CallbackHolder : public CallbackHolderBase {
  public:
   CallbackHolder(v8::Isolate* isolate,
-                 const base::Callback<Sig>& callback,
+                 const base::RepeatingCallback<Sig>& callback,
                  int flags)
       : CallbackHolderBase(isolate), callback(callback), flags(flags) {}
-  base::Callback<Sig> callback;
+  base::RepeatingCallback<Sig> callback;
   int flags = 0;
 
  private:
   virtual ~CallbackHolder() = default;
-
-  DISALLOW_COPY_AND_ASSIGN(CallbackHolder);
 };
 
 template <typename T>
@@ -94,13 +95,13 @@ bool GetNextArgument(gin::Arguments* args,
   }
 }
 
-// Support base::Optional as output, which would be empty and do not throw error
-// when convertion to T fails.
+// Support absl::optional as output, which would be empty and do not throw error
+// when conversion to T fails.
 template <typename T>
 bool GetNextArgument(gin::Arguments* args,
                      int create_flags,
                      bool is_first,
-                     base::Optional<T>* result) {
+                     absl::optional<T>* result) {
   T converted;
   // Use gin::Arguments::GetNext which always advances |next| counter.
   if (args->GetNext(&converted))
@@ -214,7 +215,8 @@ class Invoker<IndicesHolder<indices...>, ArgTypes...>
   bool IsOK() { return And(ArgumentHolder<indices, ArgTypes>::ok...); }
 
   template <typename ReturnType>
-  void DispatchToCallback(base::Callback<ReturnType(ArgTypes...)> callback) {
+  void DispatchToCallback(
+      base::RepeatingCallback<ReturnType(ArgTypes...)> callback) {
     gin_helper::MicrotasksScope microtasks_scope(args_->isolate(), true);
     args_->Return(
         callback.Run(std::move(ArgumentHolder<indices, ArgTypes>::value)...));
@@ -223,7 +225,7 @@ class Invoker<IndicesHolder<indices...>, ArgTypes...>
   // In C++, you can declare the function foo(void), but you can't pass a void
   // expression to foo. As a result, we must specialize the case of Callbacks
   // that have the void return type.
-  void DispatchToCallback(base::Callback<void(ArgTypes...)> callback) {
+  void DispatchToCallback(base::RepeatingCallback<void(ArgTypes...)> callback) {
     gin_helper::MicrotasksScope microtasks_scope(args_->isolate(), true);
     callback.Run(std::move(ArgumentHolder<indices, ArgTypes>::value)...);
   }
@@ -239,7 +241,7 @@ class Invoker<IndicesHolder<indices...>, ArgTypes...>
 };
 
 // DispatchToCallback converts all the JavaScript arguments to C++ types and
-// invokes the base::Callback.
+// invokes the base::RepeatingCallback.
 template <typename Sig>
 struct Dispatcher {};
 
@@ -264,7 +266,8 @@ struct Dispatcher<ReturnType(ArgTypes...)> {
 };
 
 // CreateFunctionTemplate creates a v8::FunctionTemplate that will create
-// JavaScript functions that execute a provided C++ function or base::Callback.
+// JavaScript functions that execute a provided C++ function or
+// base::RepeatingCallback.
 // JavaScript arguments are automatically converted via gin::Converter, as is
 // the return value of the C++ function, if any.
 //
@@ -275,7 +278,7 @@ struct Dispatcher<ReturnType(ArgTypes...)> {
 template <typename Sig>
 v8::Local<v8::FunctionTemplate> CreateFunctionTemplate(
     v8::Isolate* isolate,
-    const base::Callback<Sig> callback,
+    const base::RepeatingCallback<Sig> callback,
     int callback_flags = 0) {
   typedef CallbackHolder<Sig> HolderT;
   HolderT* holder = new HolderT(isolate, callback, callback_flags);
@@ -298,9 +301,9 @@ struct CallbackTraits {
   }
 };
 
-// Specialization for base::Callback.
+// Specialization for base::RepeatingCallback.
 template <typename T>
-struct CallbackTraits<base::Callback<T>> {
+struct CallbackTraits<base::RepeatingCallback<T>> {
   static v8::Local<v8::FunctionTemplate> CreateTemplate(
       v8::Isolate* isolate,
       const base::RepeatingCallback<T>& callback) {
@@ -326,4 +329,4 @@ struct CallbackTraits<
 
 }  // namespace gin_helper
 
-#endif  // SHELL_COMMON_GIN_HELPER_FUNCTION_TEMPLATE_H_
+#endif  // ELECTRON_SHELL_COMMON_GIN_HELPER_FUNCTION_TEMPLATE_H_

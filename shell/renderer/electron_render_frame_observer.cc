@@ -4,7 +4,6 @@
 
 #include "shell/renderer/electron_render_frame_observer.h"
 
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -19,8 +18,10 @@
 #include "net/base/net_module.h"
 #include "net/grit/net_resources.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
+#include "shell/common/gin_helper/microtasks_scope.h"
 #include "shell/common/options_switches.h"
 #include "shell/common/world_ids.h"
+#include "shell/renderer/renderer_client_base.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/common/web_preferences/web_preferences.h"
 #include "third_party/blink/public/platform/web_isolated_world_info.h"
@@ -30,6 +31,7 @@
 #include "third_party/blink/public/web/web_element.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_script_source.h"
+#include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"  // nogncheck
 #include "ui/base/resource/resource_bundle.h"
 
 namespace electron {
@@ -57,12 +59,61 @@ ElectronRenderFrameObserver::ElectronRenderFrameObserver(
 }
 
 void ElectronRenderFrameObserver::DidClearWindowObject() {
+  // Do a delayed Node.js initialization for child window.
+  // Check DidInstallConditionalFeatures below for the background.
+  auto* web_frame =
+      static_cast<blink::WebLocalFrameImpl*>(render_frame_->GetWebFrame());
+  if (has_delayed_node_initialization_ && web_frame->Opener() &&
+      !web_frame->IsOnInitialEmptyDocument()) {
+    v8::Isolate* isolate = blink::MainThreadIsolate();
+    v8::HandleScope handle_scope(isolate);
+    v8::MicrotasksScope microtasks_scope(
+        isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
+    v8::Handle<v8::Context> context = web_frame->MainWorldScriptContext();
+    v8::Context::Scope context_scope(context);
+    // DidClearWindowObject only emits for the main world.
+    DidInstallConditionalFeatures(context, MAIN_WORLD_ID);
+  }
+
   renderer_client_->DidClearWindowObject(render_frame_);
 }
 
 void ElectronRenderFrameObserver::DidInstallConditionalFeatures(
     v8::Handle<v8::Context> context,
     int world_id) {
+  // When a child window is created with window.open, its WebPreferences will
+  // be copied from its parent, and Chromium will intialize JS context in it
+  // immediately.
+  // Normally the WebPreferences is overriden in browser before navigation,
+  // but this behavior bypasses the browser side navigation and the child
+  // window will get wrong WebPreferences in the initialization.
+  // This will end up initializing Node.js in the child window with wrong
+  // WebPreferences, leads to problem that child window having node integration
+  // while "nodeIntegration=no" is passed.
+  // We work around this issue by delaying the child window's initialization of
+  // Node.js if this is the initial empty document, and only do it when the
+  // acutal page has started to load.
+  auto* web_frame =
+      static_cast<blink::WebLocalFrameImpl*>(render_frame_->GetWebFrame());
+  if (web_frame->Opener() && web_frame->IsOnInitialEmptyDocument()) {
+    // FIXME(zcbenz): Chromium does not do any browser side navigation for
+    // window.open('about:blank'), so there is no way to override WebPreferences
+    // of it. We should not delay Node.js initialization as there will be no
+    // further loadings.
+    // Please check http://crbug.com/1215096 for updates which may help remove
+    // this hack.
+    GURL url = web_frame->GetDocument().Url();
+    if (!url.IsAboutBlank()) {
+      has_delayed_node_initialization_ = true;
+      return;
+    }
+  }
+  has_delayed_node_initialization_ = false;
+
+  auto* isolate = context->GetIsolate();
+  v8::MicrotasksScope microtasks_scope(
+      isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
+
   if (ShouldNotifyClient(world_id))
     renderer_client_->DidCreateScriptContext(context, render_frame_);
 
@@ -73,29 +124,17 @@ void ElectronRenderFrameObserver::DidInstallConditionalFeatures(
   // DidCreateScriptContext();
   bool is_main_world = IsMainWorld(world_id);
   bool is_main_frame = render_frame_->IsMainFrame();
-  bool reuse_renderer_processes_enabled =
-      prefs.disable_electron_site_instance_overrides;
-  bool is_not_opened = !render_frame_->GetWebFrame()->Opener() ||
-                       prefs.node_leakage_in_renderers;
   bool allow_node_in_sub_frames = prefs.node_integration_in_sub_frames;
+
   bool should_create_isolated_context =
       use_context_isolation && is_main_world &&
-      (is_main_frame || allow_node_in_sub_frames) &&
-      (is_not_opened || reuse_renderer_processes_enabled);
+      (is_main_frame || allow_node_in_sub_frames);
 
   if (should_create_isolated_context) {
     CreateIsolatedWorldContext();
     if (!renderer_client_->IsWebViewFrame(context, render_frame_))
       renderer_client_->SetupMainWorldOverrides(context, render_frame_);
   }
-
-#if !BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
-  if (world_id >= WorldIDs::ISOLATED_WORLD_ID_EXTENSIONS &&
-      world_id <= WorldIDs::ISOLATED_WORLD_ID_EXTENSIONS_END) {
-    renderer_client_->SetupExtensionWorldOverrides(context, render_frame_,
-                                                   world_id);
-  }
-#endif
 }
 
 void ElectronRenderFrameObserver::DraggableRegionsChanged() {
@@ -150,7 +189,9 @@ void ElectronRenderFrameObserver::CreateIsolatedWorldContext() {
 
   // Create initial script context in isolated world
   blink::WebScriptSource source("void 0");
-  frame->ExecuteScriptInIsolatedWorld(WorldIDs::ISOLATED_WORLD_ID, source);
+  frame->ExecuteScriptInIsolatedWorld(
+      WorldIDs::ISOLATED_WORLD_ID, source,
+      blink::BackForwardCacheAware::kPossiblyDisallow);
 }
 
 bool ElectronRenderFrameObserver::IsMainWorld(int world_id) {
@@ -163,12 +204,24 @@ bool ElectronRenderFrameObserver::IsIsolatedWorld(int world_id) {
 
 bool ElectronRenderFrameObserver::ShouldNotifyClient(int world_id) {
   auto prefs = render_frame_->GetBlinkPreferences();
+
+  // This is necessary because if an iframe is created and a source is not
+  // set, the iframe loads about:blank and creates a script context for the
+  // same. We don't want to create a Node.js environment here because if the src
+  // is later set, the JS necessary to do that triggers illegal access errors
+  // when the initial about:blank Node.js environment is cleaned up. See:
+  // https://source.chromium.org/chromium/chromium/src/+/main:content/renderer/render_frame_impl.h;l=870-892;drc=4b6001440a18740b76a1c63fa2a002cc941db394
+  GURL url = render_frame_->GetWebFrame()->GetDocument().Url();
   bool allow_node_in_sub_frames = prefs.node_integration_in_sub_frames;
+  if (allow_node_in_sub_frames && url.IsAboutBlank() &&
+      !render_frame_->IsMainFrame())
+    return false;
+
   if (prefs.context_isolation &&
       (render_frame_->IsMainFrame() || allow_node_in_sub_frames))
     return IsIsolatedWorld(world_id);
-  else
-    return IsMainWorld(world_id);
+
+  return IsMainWorld(world_id);
 }
 
 }  // namespace electron

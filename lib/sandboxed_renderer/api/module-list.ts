@@ -1,7 +1,3 @@
-const { getWebPreference } = process._linkedBinding('electron_renderer_web_frame');
-
-const enableRemoteModule = getWebPreference(window, 'enableRemoteModule');
-
 export const moduleList: ElectronInternal.ModuleEntry[] = [
   {
     name: 'contextBridge',
@@ -17,7 +13,7 @@ export const moduleList: ElectronInternal.ModuleEntry[] = [
   },
   {
     name: 'nativeImage',
-    loader: () => require('@electron/internal/renderer/api/native-image')
+    loader: () => require('@electron/internal/common/api/native-image')
   },
   {
     name: 'webFrame',
@@ -30,17 +26,3 @@ export const moduleList: ElectronInternal.ModuleEntry[] = [
     private: true
   }
 ];
-
-if (BUILDFLAG(ENABLE_DESKTOP_CAPTURER)) {
-  moduleList.push({
-    name: 'desktopCapturer',
-    loader: () => require('@electron/internal/renderer/api/desktop-capturer')
-  });
-}
-
-if (BUILDFLAG(ENABLE_REMOTE_MODULE) && enableRemoteModule) {
-  moduleList.push({
-    name: 'remote',
-    loader: () => require('@electron/internal/renderer/api/remote')
-  });
-}

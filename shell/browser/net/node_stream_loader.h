@@ -2,8 +2,8 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_BROWSER_NET_NODE_STREAM_LOADER_H_
-#define SHELL_BROWSER_NET_NODE_STREAM_LOADER_H_
+#ifndef ELECTRON_SHELL_BROWSER_NET_NODE_STREAM_LOADER_H_
+#define ELECTRON_SHELL_BROWSER_NET_NODE_STREAM_LOADER_H_
 
 #include <map>
 #include <memory>
@@ -12,7 +12,6 @@
 
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "mojo/public/cpp/system/data_pipe_producer.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
@@ -31,10 +30,14 @@ namespace electron {
 class NodeStreamLoader : public network::mojom::URLLoader {
  public:
   NodeStreamLoader(network::mojom::URLResponseHeadPtr head,
-                   network::mojom::URLLoaderRequest loader,
+                   mojo::PendingReceiver<network::mojom::URLLoader> loader,
                    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
                    v8::Isolate* isolate,
                    v8::Local<v8::Object> emitter);
+
+  // disable copy
+  NodeStreamLoader(const NodeStreamLoader&) = delete;
+  NodeStreamLoader& operator=(const NodeStreamLoader&) = delete;
 
  private:
   ~NodeStreamLoader() override;
@@ -55,13 +58,13 @@ class NodeStreamLoader : public network::mojom::URLLoader {
       const std::vector<std::string>& removed_headers,
       const net::HttpRequestHeaders& modified_headers,
       const net::HttpRequestHeaders& modified_cors_exempt_headers,
-      const base::Optional<GURL>& new_url) override {}
+      const absl::optional<GURL>& new_url) override {}
   void SetPriority(net::RequestPriority priority,
                    int32_t intra_priority_value) override {}
   void PauseReadingBodyFromNet() override {}
   void ResumeReadingBodyFromNet() override {}
 
-  mojo::Binding<network::mojom::URLLoader> binding_;
+  mojo::Receiver<network::mojom::URLLoader> url_loader_;
   mojo::Remote<network::mojom::URLLoaderClient> client_;
 
   v8::Isolate* isolate_;
@@ -95,11 +98,9 @@ class NodeStreamLoader : public network::mojom::URLLoader {
   // Store the V8 callbacks to unsubscribe them later.
   std::map<std::string, v8::Global<v8::Value>> handlers_;
 
-  base::WeakPtrFactory<NodeStreamLoader> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(NodeStreamLoader);
+  base::WeakPtrFactory<NodeStreamLoader> weak_factory_{this};
 };
 
 }  // namespace electron
 
-#endif  // SHELL_BROWSER_NET_NODE_STREAM_LOADER_H_
+#endif  // ELECTRON_SHELL_BROWSER_NET_NODE_STREAM_LOADER_H_

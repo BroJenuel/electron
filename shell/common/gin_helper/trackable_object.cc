@@ -15,7 +15,7 @@ namespace gin_helper {
 
 namespace {
 
-const char* kTrackedObjectKey = "TrackedObjectKey";
+const char kTrackedObjectKey[] = "TrackedObjectKey";
 
 class IDUserData : public base::SupportsUserData::Data {
  public:
@@ -25,19 +25,14 @@ class IDUserData : public base::SupportsUserData::Data {
 
  private:
   int32_t id_;
-
-  DISALLOW_COPY_AND_ASSIGN(IDUserData);
 };
 
 }  // namespace
 
-TrackableObjectBase::TrackableObjectBase() : weak_factory_(this) {
+TrackableObjectBase::TrackableObjectBase() {
   // TODO(zcbenz): Make TrackedObject work in renderer process.
   DCHECK(gin_helper::Locker::IsBrowserProcess())
       << "This class only works for browser process";
-
-  electron::ElectronBrowserMainParts::Get()->RegisterDestructionCallback(
-      GetDestroyClosure());
 }
 
 TrackableObjectBase::~TrackableObjectBase() = default;

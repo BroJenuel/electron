@@ -2,8 +2,8 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_BROWSER_MAC_IN_APP_PURCHASE_OBSERVER_H_
-#define SHELL_BROWSER_MAC_IN_APP_PURCHASE_OBSERVER_H_
+#ifndef ELECTRON_SHELL_BROWSER_MAC_IN_APP_PURCHASE_OBSERVER_H_
+#define ELECTRON_SHELL_BROWSER_MAC_IN_APP_PURCHASE_OBSERVER_H_
 
 #include <string>
 #include <vector>
@@ -47,17 +47,19 @@ class TransactionObserver {
   TransactionObserver();
   virtual ~TransactionObserver();
 
+  // disable copy
+  TransactionObserver(const TransactionObserver&) = delete;
+  TransactionObserver& operator=(const TransactionObserver&) = delete;
+
   virtual void OnTransactionsUpdated(
       const std::vector<Transaction>& transactions) = 0;
 
  private:
   InAppTransactionObserver* observer_;
 
-  base::WeakPtrFactory<TransactionObserver> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(TransactionObserver);
+  base::WeakPtrFactory<TransactionObserver> weak_ptr_factory_{this};
 };
 
 }  // namespace in_app_purchase
 
-#endif  // SHELL_BROWSER_MAC_IN_APP_PURCHASE_OBSERVER_H_
+#endif  // ELECTRON_SHELL_BROWSER_MAC_IN_APP_PURCHASE_OBSERVER_H_

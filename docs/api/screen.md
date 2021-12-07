@@ -76,7 +76,7 @@ Returns:
 
 * `event` Event
 * `display` [Display](structures/display.md)
-* `changedMetrics` String[]
+* `changedMetrics` string[]
 
 Emitted when one or more metrics change in a `display`. The `changedMetrics` is
 an array of strings that describe the changes. Possible changes are `bounds`,
@@ -91,6 +91,8 @@ The `screen` module has the following methods:
 Returns [`Point`](structures/point.md)
 
 The current absolute position of the mouse pointer.
+
+**Note:** The return value is a DIP point, not a screen physical point.
 
 ### `screen.getPrimaryDisplay()`
 

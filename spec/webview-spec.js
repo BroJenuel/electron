@@ -33,6 +33,28 @@ describe('<webview> tag', function () {
     return event.message;
   };
 
+  async function loadFileInWebView (webview, attributes = {}) {
+    const thisFile = url.format({
+      pathname: __filename.replace(/\\/g, '/'),
+      protocol: 'file',
+      slashes: true
+    });
+    const src = `<script>
+      function loadFile() {
+        return new Promise((resolve) => {
+          fetch('${thisFile}').then(
+            () => resolve('loaded'),
+            () => resolve('failed')
+          )
+        });
+      }
+      console.log('ok');
+    </script>`;
+    attributes.src = `data:text/html;base64,${btoa(unescape(encodeURIComponent(src)))}`;
+    await startLoadingWebViewAndWaitForMessage(webview, attributes);
+    return await webview.executeJavaScript('loadFile()');
+  }
+
   beforeEach(() => {
     webview = new WebView();
   });
@@ -112,6 +134,7 @@ describe('<webview> tag', function () {
     it('inserts node symbols when set', async () => {
       const message = await startLoadingWebViewAndWaitForMessage(webview, {
         nodeintegration: 'on',
+        webpreferences: 'contextIsolation=no',
         src: `file://${fixtures}/pages/d.html`
       });
 
@@ -132,6 +155,7 @@ describe('<webview> tag', function () {
 
       const message = await startLoadingWebViewAndWaitForMessage(webview, {
         nodeintegration: 'on',
+        webpreferences: 'contextIsolation=no',
         src: `file://${fixtures}/pages/post.html`
       });
 
@@ -154,6 +178,7 @@ describe('<webview> tag', function () {
       });
       loadWebView(webview, {
         allowpopups: 'on',
+        webpreferences: 'contextIsolation=no',
         src
       });
       const { message } = await waitForEvent(webview, 'console-message');
@@ -163,6 +188,7 @@ describe('<webview> tag', function () {
     (nativeModulesEnabled ? it : it.skip)('loads native modules when navigation happens', async function () {
       await loadWebView(webview, {
         nodeintegration: 'on',
+        webpreferences: 'contextIsolation=no',
         src: `file://${fixtures}/pages/native-module.html`
       });
 
@@ -177,7 +203,8 @@ describe('<webview> tag', function () {
     it('loads the script before other scripts in window', async () => {
       const message = await startLoadingWebViewAndWaitForMessage(webview, {
         preload: `${fixtures}/module/preload.js`,
-        src: `file://${fixtures}/pages/e.html`
+        src: `file://${fixtures}/pages/e.html`,
+        contextIsolation: false
       });
 
       expect(message).to.be.a('string');
@@ -234,6 +261,24 @@ describe('<webview> tag', function () {
 
       const message = 'boom!';
       webview.send('ping', message);
+
+      const { channel, args } = await waitForEvent(webview, 'ipc-message');
+      expect(channel).to.equal('pong');
+      expect(args).to.deep.equal([message]);
+    });
+
+    it('<webview>.sendToFrame()', async () => {
+      loadWebView(webview, {
+        nodeintegration: 'on',
+        webpreferences: 'contextIsolation=no',
+        preload: `${fixtures}/module/preload-ipc.js`,
+        src: `file://${fixtures}/pages/ipc-message.html`
+      });
+
+      const { frameId } = await waitForEvent(webview, 'ipc-message');
+
+      const message = 'boom!';
+      webview.sendToFrame(frameId, 'ping', message);
 
       const { channel, args } = await waitForEvent(webview, 'ipc-message');
       expect(channel).to.equal('pong');
@@ -316,33 +361,20 @@ describe('<webview> tag', function () {
 
   describe('disablewebsecurity attribute', () => {
     it('does not disable web security when not set', async () => {
-      const jqueryPath = path.join(__dirname, '/static/jquery-2.0.3.min.js');
-      const src = `<script src='file://${jqueryPath}'></script> <script>console.log('ok');</script>`;
-      const encoded = btoa(unescape(encodeURIComponent(src)));
-
-      const message = await startLoadingWebViewAndWaitForMessage(webview, {
-        src: `data:text/html;base64,${encoded}`
-      });
-      expect(message).to.be.a('string');
-      expect(message).to.contain('Not allowed to load local resource');
+      const result = await loadFileInWebView(webview);
+      expect(result).to.equal('failed');
     });
 
     it('disables web security when set', async () => {
-      const jqueryPath = path.join(__dirname, '/static/jquery-2.0.3.min.js');
-      const src = `<script src='file://${jqueryPath}'></script> <script>console.log('ok');</script>`;
-      const encoded = btoa(unescape(encodeURIComponent(src)));
-
-      const message = await startLoadingWebViewAndWaitForMessage(webview, {
-        disablewebsecurity: '',
-        src: `data:text/html;base64,${encoded}`
-      });
-      expect(message).to.equal('ok');
+      const result = await loadFileInWebView(webview, { disablewebsecurity: '' });
+      expect(result).to.equal('loaded');
     });
 
     it('does not break node integration', async () => {
       const message = await startLoadingWebViewAndWaitForMessage(webview, {
         disablewebsecurity: '',
         nodeintegration: 'on',
+        webpreferences: 'contextIsolation=no',
         src: `file://${fixtures}/pages/d.html`
       });
 
@@ -391,6 +423,7 @@ describe('<webview> tag', function () {
       const message = await startLoadingWebViewAndWaitForMessage(webview, {
         nodeintegration: 'on',
         partition: 'test2',
+        webpreferences: 'contextIsolation=no',
         src: `file://${fixtures}/pages/d.html`
       });
 
@@ -464,7 +497,7 @@ describe('<webview> tag', function () {
     it('can enable nodeintegration', async () => {
       const message = await startLoadingWebViewAndWaitForMessage(webview, {
         src: `file://${fixtures}/pages/d.html`,
-        webpreferences: 'nodeIntegration'
+        webpreferences: 'nodeIntegration,contextIsolation=no'
       });
 
       const types = JSON.parse(message);
@@ -475,35 +508,19 @@ describe('<webview> tag', function () {
       });
     });
 
-    ifit(features.isRemoteModuleEnabled())('can disable the remote module', async () => {
-      const message = await startLoadingWebViewAndWaitForMessage(webview, {
-        preload: `${fixtures}/module/preload-disable-remote.js`,
-        src: `file://${fixtures}/api/blank.html`,
-        webpreferences: 'enableRemoteModule=no'
-      });
-
-      const typeOfRemote = JSON.parse(message);
-      expect(typeOfRemote).to.equal('undefined');
-    });
-
     it('can disables web security and enable nodeintegration', async () => {
-      const jqueryPath = path.join(__dirname, '/static/jquery-2.0.3.min.js');
-      const src = `<script src='file://${jqueryPath}'></script> <script>console.log(typeof require);</script>`;
-      const encoded = btoa(unescape(encodeURIComponent(src)));
-
-      const message = await startLoadingWebViewAndWaitForMessage(webview, {
-        src: `data:text/html;base64,${encoded}`,
-        webpreferences: 'webSecurity=no, nodeIntegration=yes'
-      });
-
-      expect(message).to.equal('function');
+      const result = await loadFileInWebView(webview, { webpreferences: 'webSecurity=no, nodeIntegration=yes, contextIsolation=no' });
+      expect(result).to.equal('loaded');
+      const type = await webview.executeJavaScript('typeof require');
+      expect(type).to.equal('function');
     });
   });
 
   describe('new-window event', () => {
     it('emits when window.open is called', async () => {
       loadWebView(webview, {
-        src: `file://${fixtures}/pages/window-open.html`
+        src: `file://${fixtures}/pages/window-open.html`,
+        allowpopups: true
       });
       const { url, frameName } = await waitForEvent(webview, 'new-window');
 
@@ -513,7 +530,8 @@ describe('<webview> tag', function () {
 
     it('emits when link with target is called', async () => {
       loadWebView(webview, {
-        src: `file://${fixtures}/pages/target-name.html`
+        src: `file://${fixtures}/pages/target-name.html`,
+        allowpopups: true
       });
       const { url, frameName } = await waitForEvent(webview, 'new-window');
 
@@ -526,10 +544,12 @@ describe('<webview> tag', function () {
     it('emits when guest sends an ipc message to browser', async () => {
       loadWebView(webview, {
         nodeintegration: 'on',
+        webpreferences: 'contextIsolation=no',
         src: `file://${fixtures}/pages/ipc-message.html`
       });
-      const { channel, args } = await waitForEvent(webview, 'ipc-message');
+      const { frameId, channel, args } = await waitForEvent(webview, 'ipc-message');
 
+      expect(frameId).to.be.an('array').that.has.lengthOf(2);
       expect(channel).to.equal('channel');
       expect(args).to.deep.equal(['arg1', 'arg2']);
     });
@@ -560,6 +580,45 @@ describe('<webview> tag', function () {
       } else {
         expect(favicons[0]).to.equal('file:///favicon.png');
       }
+    });
+  });
+
+  describe('did-redirect-navigation event', () => {
+    let server = null;
+    let uri = null;
+
+    before((done) => {
+      server = http.createServer((req, res) => {
+        if (req.url === '/302') {
+          res.setHeader('Location', '/200');
+          res.statusCode = 302;
+          res.end();
+        } else {
+          res.end();
+        }
+      });
+      server.listen(0, '127.0.0.1', () => {
+        uri = `http://127.0.0.1:${(server.address()).port}`;
+        done();
+      });
+    });
+
+    after(() => {
+      server.close();
+    });
+
+    it('is emitted on redirects', async () => {
+      loadWebView(webview, {
+        src: `${uri}/302`
+      });
+
+      const event = await waitForEvent(webview, 'did-redirect-navigation');
+
+      expect(event.url).to.equal(`${uri}/200`);
+      expect(event.isInPlace).to.be.false();
+      expect(event.isMainFrame).to.be.true();
+      expect(event.frameProcessId).to.be.a('number');
+      expect(event.frameRoutingId).to.be.a('number');
     });
   });
 
@@ -710,6 +769,7 @@ describe('<webview> tag', function () {
     it('should emit beforeunload handler', async () => {
       await loadWebView(webview, {
         nodeintegration: 'on',
+        webpreferences: 'contextIsolation=no',
         src: `file://${fixtures}/pages/beforeunload-false.html`
       });
 
@@ -821,6 +881,7 @@ describe('<webview> tag', function () {
         });
         loadWebView(webview, {
           nodeintegration: 'on',
+          webpreferences: 'contextIsolation=no',
           src: `file://${fixtures}/pages/basic-auth.html?port=${port}`
         });
       });
@@ -896,6 +957,7 @@ describe('<webview> tag', function () {
     it('can send keyboard event', async () => {
       loadWebView(webview, {
         nodeintegration: 'on',
+        webpreferences: 'contextIsolation=no',
         src: `file://${fixtures}/pages/onkeyup.html`
       });
       await waitForEvent(webview, 'dom-ready');
@@ -915,6 +977,7 @@ describe('<webview> tag', function () {
     it('can send mouse event', async () => {
       loadWebView(webview, {
         nodeintegration: 'on',
+        webpreferences: 'contextIsolation=no',
         src: `file://${fixtures}/pages/onmouseup.html`
       });
       await waitForEvent(webview, 'dom-ready');
@@ -933,7 +996,33 @@ describe('<webview> tag', function () {
     });
   });
 
+  describe('context-menu event', () => {
+    it('emits when right-clicked in page', async () => {
+      await loadWebView(webview, { src: 'about:blank' });
+
+      const promise = waitForEvent(webview, 'context-menu');
+
+      // Simulate right-click to create context-menu event.
+      const opts = { x: 0, y: 0, button: 'right' };
+      webview.sendInputEvent({ ...opts, type: 'mouseDown' });
+      webview.sendInputEvent({ ...opts, type: 'mouseUp' });
+
+      const { params } = await promise;
+
+      expect(params.pageURL).to.equal(webview.getURL());
+      expect(params.frame).to.be.undefined();
+      expect(params.x).to.be.a('number');
+      expect(params.y).to.be.a('number');
+    });
+  });
+
   describe('media-started-playing media-paused events', () => {
+    beforeEach(function () {
+      if (!document.createElement('audio').canPlayType('audio/wav')) {
+        this.skip();
+      }
+    });
+
     it('emits when audio starts and stops playing', async () => {
       await loadWebView(webview, { src: `file://${fixtures}/pages/base-page.html` });
 
@@ -983,16 +1072,6 @@ describe('<webview> tag', function () {
 
       expect(activeMatchOrdinal).to.deep.equal([1, 2, 3]);
       webview.stopFindInPage('clearSelection');
-    });
-  });
-
-  // TODO (jkleinsc) - reenable this test on WOA once https://github.com/electron/electron/issues/26045 is resolved
-  ifdescribe(process.platform !== 'win32' || process.arch !== 'arm64')('did-change-theme-color event', () => {
-    it('emits when theme color changes', async () => {
-      loadWebView(webview, {
-        src: `file://${fixtures}/pages/theme-color.html`
-      });
-      await waitForEvent(webview, 'did-change-theme-color');
     });
   });
 

@@ -2,8 +2,8 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_COMMON_GIN_CONVERTERS_CALLBACK_CONVERTER_H_
-#define SHELL_COMMON_GIN_CONVERTERS_CALLBACK_CONVERTER_H_
+#ifndef ELECTRON_SHELL_COMMON_GIN_CONVERTERS_CALLBACK_CONVERTER_H_
+#define ELECTRON_SHELL_COMMON_GIN_CONVERTERS_CALLBACK_CONVERTER_H_
 
 #include <utility>
 
@@ -19,7 +19,7 @@ struct Converter<base::RepeatingCallback<Sig>> {
     // We don't use CreateFunctionTemplate here because it creates a new
     // FunctionTemplate everytime, which is cached by V8 and causes leaks.
     auto translater =
-        base::Bind(&gin_helper::NativeFunctionInvoker<Sig>::Go, val);
+        base::BindRepeating(&gin_helper::NativeFunctionInvoker<Sig>::Go, val);
     // To avoid memory leak, we ensure that the callback can only be called
     // for once.
     return gin_helper::CreateFunctionFromTranslater(isolate, translater, true);
@@ -56,4 +56,4 @@ struct Converter<base::OnceCallback<Sig>> {
 
 }  // namespace gin
 
-#endif  // SHELL_COMMON_GIN_CONVERTERS_CALLBACK_CONVERTER_H_
+#endif  // ELECTRON_SHELL_COMMON_GIN_CONVERTERS_CALLBACK_CONVERTER_H_

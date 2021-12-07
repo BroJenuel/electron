@@ -2,8 +2,8 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_BROWSER_ELECTRON_AUTOFILL_DRIVER_H_
-#define SHELL_BROWSER_ELECTRON_AUTOFILL_DRIVER_H_
+#ifndef ELECTRON_SHELL_BROWSER_ELECTRON_AUTOFILL_DRIVER_H_
+#define ELECTRON_SHELL_BROWSER_ELECTRON_AUTOFILL_DRIVER_H_
 
 #include <memory>
 #include <vector>
@@ -12,21 +12,26 @@
 #include "shell/browser/ui/autofill_popup.h"
 #endif
 
-#include "mojo/public/cpp/bindings/associated_binding.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "shell/common/api/api.mojom.h"
 
 namespace electron {
 
 class AutofillDriver : public mojom::ElectronAutofillDriver {
  public:
-  AutofillDriver(content::RenderFrameHost* render_frame_host,
-                 mojom::ElectronAutofillDriverAssociatedRequest request);
-
+  explicit AutofillDriver(content::RenderFrameHost* render_frame_host);
+  AutofillDriver(const AutofillDriver&) = delete;
+  AutofillDriver& operator=(const AutofillDriver&) = delete;
   ~AutofillDriver() override;
 
+  void BindPendingReceiver(
+      mojo::PendingAssociatedReceiver<mojom::ElectronAutofillDriver>
+          pending_receiver);
+
   void ShowAutofillPopup(const gfx::RectF& bounds,
-                         const std::vector<base::string16>& values,
-                         const std::vector<base::string16>& labels) override;
+                         const std::vector<std::u16string>& values,
+                         const std::vector<std::u16string>& labels) override;
   void HideAutofillPopup() override;
 
  private:
@@ -36,9 +41,9 @@ class AutofillDriver : public mojom::ElectronAutofillDriver {
   std::unique_ptr<AutofillPopup> autofill_popup_;
 #endif
 
-  mojo::AssociatedBinding<mojom::ElectronAutofillDriver> binding_;
+  mojo::AssociatedReceiver<mojom::ElectronAutofillDriver> receiver_{this};
 };
 
 }  // namespace electron
 
-#endif  // SHELL_BROWSER_ELECTRON_AUTOFILL_DRIVER_H_
+#endif  // ELECTRON_SHELL_BROWSER_ELECTRON_AUTOFILL_DRIVER_H_

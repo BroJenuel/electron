@@ -3,8 +3,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-CHROMIUM file.
 
-#ifndef SHELL_BROWSER_UI_INSPECTABLE_WEB_CONTENTS_VIEW_MAC_H_
-#define SHELL_BROWSER_UI_INSPECTABLE_WEB_CONTENTS_VIEW_MAC_H_
+#ifndef ELECTRON_SHELL_BROWSER_UI_INSPECTABLE_WEB_CONTENTS_VIEW_MAC_H_
+#define ELECTRON_SHELL_BROWSER_UI_INSPECTABLE_WEB_CONTENTS_VIEW_MAC_H_
 
 #include "shell/browser/ui/inspectable_web_contents_view.h"
 
@@ -33,7 +33,7 @@ class InspectableWebContentsViewMac : public InspectableWebContentsView {
   void SetIsDocked(bool docked, bool activate) override;
   void SetContentsResizingStrategy(
       const DevToolsContentsResizingStrategy& strategy) override;
-  void SetTitle(const base::string16& title) override;
+  void SetTitle(const std::u16string& title) override;
 
   InspectableWebContents* inspectable_web_contents() {
     return inspectable_web_contents_;
@@ -48,4 +48,4 @@ class InspectableWebContentsViewMac : public InspectableWebContentsView {
 
 }  // namespace electron
 
-#endif  // SHELL_BROWSER_UI_INSPECTABLE_WEB_CONTENTS_VIEW_MAC_H_
+#endif  // ELECTRON_SHELL_BROWSER_UI_INSPECTABLE_WEB_CONTENTS_VIEW_MAC_H_

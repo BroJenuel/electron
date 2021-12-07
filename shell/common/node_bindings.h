@@ -2,20 +2,18 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
-#ifndef SHELL_COMMON_NODE_BINDINGS_H_
-#define SHELL_COMMON_NODE_BINDINGS_H_
+#ifndef ELECTRON_SHELL_COMMON_NODE_BINDINGS_H_
+#define ELECTRON_SHELL_COMMON_NODE_BINDINGS_H_
 
 #include <type_traits>
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/single_thread_task_runner.h"
 #include "uv.h"  // NOLINT(build/include_directory)
 #include "v8/include/v8.h"
 
 namespace base {
-class MessageLoop;
+class SingleThreadTaskRunner;
 }
 
 namespace node {
@@ -110,6 +108,10 @@ class NodeBindings {
 
   bool in_worker_loop() const { return uv_loop_ == &worker_loop_; }
 
+  // disable copy
+  NodeBindings(const NodeBindings&) = delete;
+  NodeBindings& operator=(const NodeBindings&) = delete;
+
  protected:
   explicit NodeBindings(BrowserEnvironment browser_env);
 
@@ -159,11 +161,13 @@ class NodeBindings {
   // Isolate data used in creating the environment
   node::IsolateData* isolate_data_ = nullptr;
 
-  base::WeakPtrFactory<NodeBindings> weak_factory_;
+#if !defined(OS_WIN)
+  int handle_ = -1;
+#endif
 
-  DISALLOW_COPY_AND_ASSIGN(NodeBindings);
+  base::WeakPtrFactory<NodeBindings> weak_factory_{this};
 };
 
 }  // namespace electron
 
-#endif  // SHELL_COMMON_NODE_BINDINGS_H_
+#endif  // ELECTRON_SHELL_COMMON_NODE_BINDINGS_H_

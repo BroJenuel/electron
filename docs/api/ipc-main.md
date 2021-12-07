@@ -40,6 +40,8 @@ ipcMain.on('synchronous-message', (event, arg) => {
 
 ```javascript
 // In renderer process (web page).
+// NB. Electron APIs are only accessible from preload, unless contextIsolation is disabled.
+// See https://www.electronjs.org/docs/tutorial/process-model#preload-scripts for more details.
 const { ipcRenderer } = require('electron')
 console.log(ipcRenderer.sendSync('synchronous-message', 'ping')) // prints "pong"
 
@@ -55,7 +57,7 @@ The `ipcMain` module has the following method to listen for events:
 
 ### `ipcMain.on(channel, listener)`
 
-* `channel` String
+* `channel` string
 * `listener` Function
   * `event` IpcMainEvent
   * `...args` any[]
@@ -65,7 +67,7 @@ Listens to `channel`, when a new message arrives `listener` would be called with
 
 ### `ipcMain.once(channel, listener)`
 
-* `channel` String
+* `channel` string
 * `listener` Function
   * `event` IpcMainEvent
   * `...args` any[]
@@ -75,7 +77,7 @@ only the next time a message is sent to `channel`, after which it is removed.
 
 ### `ipcMain.removeListener(channel, listener)`
 
-* `channel` String
+* `channel` string
 * `listener` Function
   * `...args` any[]
 
@@ -84,13 +86,13 @@ Removes the specified `listener` from the listener array for the specified
 
 ### `ipcMain.removeAllListeners([channel])`
 
-* `channel` String (optional)
+* `channel` string (optional)
 
 Removes listeners of the specified `channel`.
 
 ### `ipcMain.handle(channel, listener)`
 
-* `channel` String
+* `channel` string
 * `listener` Function<Promise\<void> | any>
   * `event` IpcMainInvokeEvent
   * `...args` any[]
@@ -120,9 +122,14 @@ The `event` that is passed as the first argument to the handler is the same as
 that passed to a regular event listener. It includes information about which
 WebContents is the source of the invoke request.
 
+Errors thrown through `handle` in the main process are not transparent as they
+are serialized and only the `message` property from the original error is
+provided to the renderer process. Please refer to
+[#24427](https://github.com/electron/electron/issues/24427) for details.
+
 ### `ipcMain.handleOnce(channel, listener)`
 
-* `channel` String
+* `channel` string
 * `listener` Function<Promise\<void> | any>
   * `event` IpcMainInvokeEvent
   * `...args` any[]
@@ -132,7 +139,7 @@ Handles a single `invoke`able IPC message, then removes the listener. See
 
 ### `ipcMain.removeHandler(channel)`
 
-* `channel` String
+* `channel` string
 
 Removes any handler for `channel`, if present.
 

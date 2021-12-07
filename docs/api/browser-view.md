@@ -1,13 +1,15 @@
-## Class: BrowserView
-
-> Create and control views.
-
-Process: [Main](../glossary.md#main-process)
+# BrowserView
 
 A `BrowserView` can be used to embed additional web content into a
 [`BrowserWindow`](browser-window.md). It is like a child window, except that it is positioned
 relative to its owning window. It is meant to be an alternative to the
 `webview` tag.
+
+## Class: BrowserView
+
+> Create and control views.
+
+Process: [Main](../glossary.md#main-process)
 
 ### Example
 
@@ -43,13 +45,13 @@ Objects created with `new BrowserView` have the following instance methods:
 #### `view.setAutoResize(options)` _Experimental_
 
 * `options` Object
-  * `width` Boolean (optional) - If `true`, the view's width will grow and shrink together
+  * `width` boolean (optional) - If `true`, the view's width will grow and shrink together
     with the window. `false` by default.
-  * `height` Boolean (optional) - If `true`, the view's height will grow and shrink
+  * `height` boolean (optional) - If `true`, the view's height will grow and shrink
     together with the window. `false` by default.
-  * `horizontal` Boolean (optional) - If `true`, the view's x position and width will grow
+  * `horizontal` boolean (optional) - If `true`, the view's x position and width will grow
     and shrink proportionally with the window. `false` by default.
-  * `vertical` Boolean (optional) - If `true`, the view's y position and height will grow
+  * `vertical` boolean (optional) - If `true`, the view's y position and height will grow
     and shrink proportionally with the window. `false` by default.
 
 #### `view.setBounds(bounds)` _Experimental_
@@ -66,5 +68,5 @@ The `bounds` of this BrowserView instance as `Object`.
 
 #### `view.setBackgroundColor(color)` _Experimental_
 
-* `color` String - Color in `#aarrggbb` or `#argb` form. The alpha channel is
+* `color` string - Color in `#aarrggbb` or `#argb` form. The alpha channel is
   optional.
