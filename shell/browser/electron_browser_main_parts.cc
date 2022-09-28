@@ -11,17 +11,23 @@
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
+#include "base/i18n/rtl.h"
 #include "base/metrics/field_trial.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/icon_manager.h"
+#include "chrome/browser/ui/color/chrome_color_mixers.h"
+#include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
+#include "components/os_crypt/key_storage_config_linux.h"
 #include "components/os_crypt/os_crypt.h"
 #include "content/browser/browser_main_loop.h"  // nogncheck
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/device_service.h"
+#include "content/public/browser/first_party_sets_handler.h"
 #include "content/public/browser/web_ui_controller_factory.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
@@ -61,28 +67,31 @@
 #include "ui/wm/core/wm_state.h"
 #endif
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
 #include "base/environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/dbus/dbus_bluez_manager_wrapper_linux.h"
+#include "electron/electron_gtk_stubs.h"
 #include "ui/base/cursor/cursor_factory.h"
 #include "ui/base/ime/linux/linux_input_method_context_factory.h"
 #include "ui/gfx/color_utils.h"
-#include "ui/gtk/gtk_ui_factory.h"
-#include "ui/gtk/gtk_util.h"
+#include "ui/gtk/gtk_compat.h"  // nogncheck
+#include "ui/gtk/gtk_util.h"    // nogncheck
+#include "ui/linux/linux_ui.h"
+#include "ui/linux/linux_ui_factory.h"
 #include "ui/ozone/public/ozone_platform.h"
-#include "ui/views/linux_ui/linux_ui.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/display/win/dpi.h"
 #include "ui/gfx/system_fonts_win.h"
 #include "ui/strings/grit/app_locale_settings.h"
 #endif
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
+#include "components/os_crypt/keychain_password_mac.h"
 #include "services/device/public/cpp/geolocation/geolocation_manager.h"
 #include "shell/browser/ui/cocoa/views_delegate_mac.h"
 #else
@@ -111,7 +120,7 @@ void Erase(T* container, typename T::iterator iter) {
   container->erase(iter);
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // gfx::Font callbacks
 void AdjustUIFont(gfx::win::FontAdjustment* font_adjustment) {
   l10n_util::NeedOverrideDefaultUIFont(&font_adjustment->font_family_override,
@@ -131,7 +140,7 @@ std::u16string MediaStringProvider(media::MessageId id) {
   switch (id) {
     case media::DEFAULT_AUDIO_DEVICE_NAME:
       return u"Default";
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     case media::COMMUNICATIONS_AUDIO_DEVICE_NAME:
       return u"Communications";
 #endif
@@ -140,7 +149,7 @@ std::u16string MediaStringProvider(media::MessageId id) {
   }
 }
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
 // GTK does not provide a way to check if current theme is dark, so we compare
 // the text and background luminosity to get a result.
 // This trick comes from FireFox.
@@ -158,7 +167,7 @@ void UpdateDarkThemeSetting() {
 
 }  // namespace
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
 class DarkThemeObserver : public ui::NativeThemeObserver {
  public:
   DarkThemeObserver() = default;
@@ -173,8 +182,7 @@ class DarkThemeObserver : public ui::NativeThemeObserver {
 // static
 ElectronBrowserMainParts* ElectronBrowserMainParts::self_ = nullptr;
 
-ElectronBrowserMainParts::ElectronBrowserMainParts(
-    const content::MainFunctionParams& params)
+ElectronBrowserMainParts::ElectronBrowserMainParts()
     : fake_browser_process_(std::make_unique<BrowserProcessImpl>()),
       browser_(std::make_unique<Browser>()),
       node_bindings_(
@@ -208,12 +216,19 @@ int ElectronBrowserMainParts::GetExitCode() const {
 
 int ElectronBrowserMainParts::PreEarlyInitialization() {
   field_trial_list_ = std::make_unique<base::FieldTrialList>(nullptr);
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
   HandleSIGCHLD();
 #endif
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
+  DetectOzonePlatform();
   ui::OzonePlatform::PreEarlyInitialization();
 #endif
+#if BUILDFLAG(IS_MAC)
+  screen_ = std::make_unique<display::ScopedNativeScreen>();
+#endif
+
+  ui::ColorProviderManager::Get().AppendColorProviderInitializer(
+      base::BindRepeating(AddChromeColorMixers));
 
   return GetExitCode();
 }
@@ -269,27 +284,27 @@ void ElectronBrowserMainParts::PostEarlyInitialization() {
 }
 
 int ElectronBrowserMainParts::PreCreateThreads() {
-#if defined(USE_AURA)
-  screen_ = views::CreateDesktopScreen();
-  display::Screen::SetScreenInstance(screen_.get());
-#if defined(OS_LINUX)
-  views::LinuxUI::instance()->UpdateDeviceScaleFactor();
-#endif
-#endif
-
-  if (!views::LayoutProvider::Get())
+  if (!views::LayoutProvider::Get()) {
     layout_provider_ = std::make_unique<views::LayoutProvider>();
+  }
+
+  // Fetch the system locale for Electron.
+#if BUILDFLAG(IS_MAC)
+  fake_browser_process_->SetSystemLocale(GetCurrentSystemLocale());
+#else
+  fake_browser_process_->SetSystemLocale(base::i18n::GetConfiguredLocale());
+#endif
 
   auto* command_line = base::CommandLine::ForCurrentProcess();
   std::string locale = command_line->GetSwitchValueASCII(::switches::kLang);
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   // The browser process only wants to support the language Cocoa will use,
   // so force the app locale to be overridden with that value. This must
   // happen before the ResourceBundle is loaded
   if (locale.empty())
     l10n_util::OverrideLocaleWithCocoaLocale();
-#elif defined(OS_LINUX)
+#elif BUILDFLAG(IS_LINUX)
   // l10n_util::GetApplicationLocaleInternal uses g_get_language_names(),
   // which keys off of getenv("LC_ALL").
   // We must set this env first to make ui::ResourceBundle accept the custom
@@ -307,12 +322,20 @@ int ElectronBrowserMainParts::PreCreateThreads() {
   // Load resources bundle according to locale.
   std::string loaded_locale = LoadResourceBundle(locale);
 
-  // Initialize the app locale.
+#if defined(USE_AURA)
+  // NB: must be called _after_ locale resource bundle is loaded,
+  // because ui lib makes use of it in X11
+  if (!display::Screen::GetScreen()) {
+    screen_ = views::CreateDesktopScreen();
+  }
+#endif
+
+  // Initialize the app locale for Electron and Chromium.
   std::string app_locale = l10n_util::GetApplicationLocale(loaded_locale);
   ElectronBrowserClient::SetApplicationLocale(app_locale);
   fake_browser_process_->SetApplicationLocale(app_locale);
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
   // Reset to the original LC_ALL since we should not be changing it.
   if (!locale.empty()) {
     if (lc_all)
@@ -328,7 +351,7 @@ int ElectronBrowserMainParts::PreCreateThreads() {
   // Force MediaCaptureDevicesDispatcher to be created on UI thread.
   MediaCaptureDevicesDispatcher::GetInstance();
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   ui::InitIdleMonitor();
 #endif
 
@@ -341,8 +364,8 @@ int ElectronBrowserMainParts::PreCreateThreads() {
 }
 
 void ElectronBrowserMainParts::PostCreateThreads() {
-  base::PostTask(
-      FROM_HERE, {content::BrowserThread::IO},
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&tracing::TracingSamplerProfiler::CreateOnChildThread));
 }
 
@@ -351,7 +374,7 @@ void ElectronBrowserMainParts::PostDestroyThreads() {
   extensions_browser_client_.reset();
   extensions::ExtensionsBrowserClient::Set(nullptr);
 #endif
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
   device::BluetoothAdapterFactory::Shutdown();
   bluez::DBusBluezManagerWrapperLinux::Shutdown();
 #endif
@@ -359,10 +382,18 @@ void ElectronBrowserMainParts::PostDestroyThreads() {
 }
 
 void ElectronBrowserMainParts::ToolkitInitialized() {
-#if defined(OS_LINUX)
-  auto linux_ui = BuildGtkUi();
-  linux_ui->Initialize();
-  DCHECK(ui::LinuxInputMethodContextFactory::instance());
+#if BUILDFLAG(IS_LINUX)
+  auto* linux_ui = ui::GetDefaultLinuxUi();
+
+  // Try loading gtk symbols used by Electron.
+  electron::InitializeElectron_gtk(gtk::GetLibGtk());
+  if (!electron::IsElectron_gtkInitialized()) {
+    electron::UninitializeElectron_gtk();
+  }
+
+  electron::InitializeElectron_gdk_pixbuf(gtk::GetLibGdkPixbuf());
+  CHECK(electron::IsElectron_gdk_pixbufInitialized())
+      << "Failed to initialize libgdk_pixbuf-2.0.so.0";
 
   // Chromium does not respect GTK dark theme setting, but they may change
   // in future and this code might be no longer needed. Check the Chromium
@@ -372,8 +403,8 @@ void ElectronBrowserMainParts::ToolkitInitialized() {
   // Update the native theme when GTK theme changes. The GetNativeTheme
   // here returns a NativeThemeGtk, which monitors GTK settings.
   dark_theme_observer_ = std::make_unique<DarkThemeObserver>();
-  linux_ui->GetNativeTheme(nullptr)->AddObserver(dark_theme_observer_.get());
-  views::LinuxUI::SetInstance(std::move(linux_ui));
+  linux_ui->GetNativeTheme()->AddObserver(dark_theme_observer_.get());
+  ui::LinuxUi::SetInstance(linux_ui);
 
   // Cursor theme changes are tracked by LinuxUI (via a CursorThemeManager
   // implementation). Start observing them once it's initialized.
@@ -384,12 +415,12 @@ void ElectronBrowserMainParts::ToolkitInitialized() {
   wm_state_ = std::make_unique<wm::WMState>();
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   gfx::win::SetAdjustFontCallback(&AdjustUIFont);
   gfx::win::SetGetMinimumFontSizeCallback(&GetMinimumFontSize);
 #endif
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   views_delegate_ = std::make_unique<ViewsDelegateMac>();
 #else
   views_delegate_ = std::make_unique<ViewsDelegate>();
@@ -399,8 +430,8 @@ void ElectronBrowserMainParts::ToolkitInitialized() {
 int ElectronBrowserMainParts::PreMainMessageLoopRun() {
   // Run user's main script before most things get initialized, so we can have
   // a chance to setup everything.
-  node_bindings_->PrepareMessageLoop();
-  node_bindings_->RunMessageLoop();
+  node_bindings_->PrepareEmbedThread();
+  node_bindings_->StartPolling();
 
   // url::Add*Scheme are not threadsafe, this helps prevent data races.
   url::LockSchemeRegistries();
@@ -429,8 +460,8 @@ int ElectronBrowserMainParts::PreMainMessageLoopRun() {
   if (command_line->HasSwitch(switches::kRemoteDebuggingPipe)) {
     // --remote-debugging-pipe
     auto on_disconnect = base::BindOnce([]() {
-      base::PostTask(FROM_HERE, {content::BrowserThread::UI},
-                     base::BindOnce([]() { Browser::Get()->Quit(); }));
+      content::GetUIThreadTaskRunner({})->PostTask(
+          FROM_HERE, base::BindOnce([]() { Browser::Get()->Quit(); }));
     });
     content::DevToolsAgentHost::StartRemoteDebuggingPipeHandler(
         std::move(on_disconnect));
@@ -439,10 +470,10 @@ int ElectronBrowserMainParts::PreMainMessageLoopRun() {
     DevToolsManagerDelegate::StartHttpHandler();
   }
 
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
   // The corresponding call in macOS is in ElectronApplicationDelegate.
   Browser::Get()->WillFinishLaunching();
-  Browser::Get()->DidFinishLaunching(base::DictionaryValue());
+  Browser::Get()->DidFinishLaunching(base::Value::Dict());
 #endif
 
   // Notify observers that main thread message loop was initialized.
@@ -455,18 +486,45 @@ void ElectronBrowserMainParts::WillRunMainMessageLoop(
     std::unique_ptr<base::RunLoop>& run_loop) {
   js_env_->OnMessageLoopCreated();
   exit_code_ = content::RESULT_CODE_NORMAL_EXIT;
-  Browser::Get()->SetMainMessageLoopQuitClosure(run_loop->QuitClosure());
+  Browser::Get()->SetMainMessageLoopQuitClosure(
+      run_loop->QuitWhenIdleClosure());
 }
 
 void ElectronBrowserMainParts::PostCreateMainMessageLoop() {
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC)
+  std::string app_name = electron::Browser::Get()->GetName();
+#endif
+#if BUILDFLAG(IS_LINUX)
   auto shutdown_cb =
       base::BindOnce(base::RunLoop::QuitCurrentWhenIdleClosureDeprecated());
   ui::OzonePlatform::GetInstance()->PostCreateMainMessageLoop(
       std::move(shutdown_cb));
   bluez::DBusBluezManagerWrapperLinux::Initialize();
+
+  // Set up crypt config. This needs to be done before anything starts the
+  // network service, as the raw encryption key needs to be shared with the
+  // network service for encrypted cookie storage.
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  std::unique_ptr<os_crypt::Config> config =
+      std::make_unique<os_crypt::Config>();
+  // Forward to os_crypt the flag to use a specific password store.
+  config->store = command_line.GetSwitchValueASCII(::switches::kPasswordStore);
+  config->product_name = app_name;
+  config->application_name = app_name;
+  config->main_thread_runner = base::ThreadTaskRunnerHandle::Get();
+  // c.f.
+  // https://source.chromium.org/chromium/chromium/src/+/master:chrome/common/chrome_switches.cc;l=689;drc=9d82515060b9b75fa941986f5db7390299669ef1
+  config->should_use_preference =
+      command_line.HasSwitch(::switches::kEnableEncryptionSelection);
+  base::PathService::Get(DIR_SESSION_DATA, &config->user_data_path);
+  OSCrypt::SetConfig(std::move(config));
 #endif
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_MAC)
+  KeychainPassword::GetServiceName() = app_name + " Safe Storage";
+  KeychainPassword::GetAccountName() = app_name;
+#endif
+#if BUILDFLAG(IS_POSIX)
   // Exit in response to SIGINT, SIGTERM, etc.
   InstallShutdownSignalHandlers(
       base::BindOnce(&Browser::Quit, base::Unretained(Browser::Get())),
@@ -475,7 +533,7 @@ void ElectronBrowserMainParts::PostCreateMainMessageLoop() {
 }
 
 void ElectronBrowserMainParts::PostMainMessageLoopRun() {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   FreeAppDelegate();
 #endif
 
@@ -504,25 +562,25 @@ void ElectronBrowserMainParts::PostMainMessageLoopRun() {
   fake_browser_process_->PostMainMessageLoopRun();
   content::DevToolsAgentHost::StopRemoteDebuggingPipeHandler();
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
   ui::OzonePlatform::GetInstance()->PostMainMessageLoopRun();
 #endif
 }
 
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
 void ElectronBrowserMainParts::PreCreateMainMessageLoop() {
   PreCreateMainMessageLoopCommon();
 }
 #endif
 
 void ElectronBrowserMainParts::PreCreateMainMessageLoopCommon() {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   InitializeMainNib();
   RegisterURLHandler();
 #endif
   media::SetLocalizedStringProvider(MediaStringProvider);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   auto* local_state = g_browser_process->local_state();
   DCHECK(local_state);
 
@@ -540,7 +598,7 @@ ElectronBrowserMainParts::GetGeolocationControl() {
   return geolocation_control_.get();
 }
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 device::GeolocationManager* ElectronBrowserMainParts::GetGeolocationManager() {
   return geolocation_manager_.get();
 }

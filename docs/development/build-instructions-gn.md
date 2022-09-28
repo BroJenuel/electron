@@ -98,45 +98,40 @@ $ gclient sync -f
 
 ## Building
 
+**Set the environment variable for chromium build tools**
+
+On Linux & MacOS
+
 ```sh
 $ cd src
 $ export CHROMIUM_BUILDTOOLS_PATH=`pwd`/buildtools
-$ gn gen out/Testing --args="import(\"//electron/build/args/testing.gn\") $GN_EXTRA_ARGS"
 ```
 
-Or on Windows (without the optional argument):
+On Windows:
 
 ```sh
 $ cd src
 $ set CHROMIUM_BUILDTOOLS_PATH=%cd%\buildtools
+```
+
+**To generate Testing build config of Electron:**
+
+```sh
 $ gn gen out/Testing --args="import(\"//electron/build/args/testing.gn\")"
 ```
 
-This will generate a build directory `out/Testing` under `src/` with
-the testing build configuration. You can replace `Testing` with another name,
-but it should be a subdirectory of `out`.
-Also you shouldn't have to run `gn gen` again—if you want to change the
-build arguments, you can run `gn args out/Testing` to bring up an editor.
-
-To see the list of available build configuration options, run `gn args
-out/Testing --list`.
-
-**For generating Testing build config of
-Electron:**
+**To generate Release build config of Electron:**
 
 ```sh
-$ gn gen out/Testing --args="import(\"//electron/build/args/testing.gn\") $GN_EXTRA_ARGS"
+$ gn gen out/Release --args="import(\"//electron/build/args/release.gn\")"
 ```
 
-**For generating Release (aka "non-component" or "static") build config of
-Electron:**
+**Note:** This will generate a `out/Testing` or `out/Release` build directory under `src/` with the testing or release build depending upon the configuration passed above. You can replace `Testing|Release` with another names, but it should be a subdirectory of `out`.
 
-```sh
-$ gn gen out/Release --args="import(\"//electron/build/args/release.gn\") $GN_EXTRA_ARGS"
-```
+Also you shouldn't have to run `gn gen` again—if you want to change the build arguments, you can run `gn args out/Testing` to bring up an editor. To see the list of available build configuration options, run `gn args out/Testing --list`.
 
 **To build, run `ninja` with the `electron` target:**
-Nota Bene: This will also take a while and probably heat up your lap.
+Note: This will also take a while and probably heat up your lap.
 
 For the testing configuration:
 
@@ -169,13 +164,13 @@ $ ./out/Testing/electron
 On linux, first strip the debugging and symbol information:
 
 ```sh
-electron/script/strip-binaries.py -d out/Release
+$ electron/script/strip-binaries.py -d out/Release
 ```
 
 To package the electron build as a distributable zip file:
 
 ```sh
-ninja -C out/Release electron:electron_dist_zip
+$ ninja -C out/Release electron:electron_dist_zip
 ```
 
 ### Cross-compiling
@@ -201,12 +196,12 @@ If you test other combinations and find them to work, please update this documen
 See the GN reference for allowable values of [`target_os`][target_os values]
 and [`target_cpu`][target_cpu values].
 
-[target_os values]: https://gn.googlesource.com/gn/+/master/docs/reference.md#built_in-predefined-variables-target_os_the-desired-operating-system-for-the-build-possible-values
-[target_cpu values]: https://gn.googlesource.com/gn/+/master/docs/reference.md#built_in-predefined-variables-target_cpu_the-desired-cpu-architecture-for-the-build-possible-values
+[target_os values]: https://gn.googlesource.com/gn/+/main/docs/reference.md#built_in-predefined-variables-target_os_the-desired-operating-system-for-the-build-possible-values
+[target_cpu values]: https://gn.googlesource.com/gn/+/main/docs/reference.md#built_in-predefined-variables-target_cpu_the-desired-cpu-architecture-for-the-build-possible-values
 
 #### Windows on Arm (experimental)
 
-To cross-compile for Windows on Arm, [follow Chromium's guide](https://chromium.googlesource.com/chromium/src/+/refs/heads/master/docs/windows_build_instructions.md#Visual-Studio) to get the necessary dependencies, SDK and libraries, then build with `ELECTRON_BUILDING_WOA=1` in your environment before running `gclient sync`.
+To cross-compile for Windows on Arm, [follow Chromium's guide](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/docs/windows_build_instructions.md#Visual-Studio) to get the necessary dependencies, SDK and libraries, then build with `ELECTRON_BUILDING_WOA=1` in your environment before running `gclient sync`.
 
 ```bat
 set ELECTRON_BUILDING_WOA=1
@@ -286,9 +281,22 @@ $ cd electron
 $ gclient sync -f
 ```
 
+This may also happen if you have checked out a branch (as opposed to having a detached head) in `electron/src/`
+or some other dependency’s repository. If that is the case, a `git checkout --detach HEAD` in the appropriate repository should do the trick.
+
 ### I'm being asked for a username/password for chromium-internal.googlesource.com
 
 If you see a prompt for `Username for 'https://chrome-internal.googlesource.com':` when running `gclient sync` on Windows, it's probably because the `DEPOT_TOOLS_WIN_TOOLCHAIN` environment variable is not set to 0. Open `Control Panel` → `System and Security` → `System` → `Advanced system settings` and add a system variable
 `DEPOT_TOOLS_WIN_TOOLCHAIN` with value `0`.  This tells `depot_tools` to use
 your locally installed version of Visual Studio (by default, `depot_tools` will
 try to download a Google-internal version that only Googlers have access to).
+
+### `e` Module not found
+
+If `e` is not recognized despite running `npm i -g @electron/build-tools`, ie:
+
+```sh
+Error: Cannot find module '/Users/<user>/.electron_build_tools/src/e'
+```
+
+We recommend installing Node through [nvm](https://github.com/nvm-sh/nvm). This allows for easier Node version management, and is often a fix for missing `e` modules.

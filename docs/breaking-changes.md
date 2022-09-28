@@ -12,6 +12,184 @@ This document uses the following convention to categorize breaking changes:
 * **Deprecated:** An API was marked as deprecated. The API will continue to function, but will emit a deprecation warning, and will be removed in a future release.
 * **Removed:** An API or feature was removed, and is no longer supported by Electron.
 
+## Planned Breaking API Changes (23.0)
+
+### Removed: BrowserWindow `scroll-touch-*` events
+
+The deprecated `scroll-touch-begin`, `scroll-touch-end` and `scroll-touch-edge`
+events on BrowserWindow have been removed. Instead, use the newly available
+[`input-event` event](api/web-contents.md#event-input-event) on WebContents.
+
+```js
+// Removed in Electron 23.0
+win.on('scroll-touch-begin', scrollTouchBegin)
+win.on('scroll-touch-edge', scrollTouchEdge)
+win.on('scroll-touch-end', scrollTouchEnd)
+
+// Replace with
+win.webContents.on('input-event', (_, event) => {
+  if (event.type === 'gestureScrollBegin') {
+    scrollTouchBegin()
+  } else if (event.type === 'gestureScrollUpdate') {
+    scrollTouchEdge()
+  } else if (event.type === 'gestureScrollEnd') {
+    scrollTouchEnd()
+  }
+})
+```
+
+## Planned Breaking API Changes (22.0)
+
+### Removed: WebContents `new-window` event
+
+The `new-window` event of WebContents has been removed. It is replaced by [`webContents.setWindowOpenHandler()`](api/web-contents.md#contentssetwindowopenhandlerhandler).
+
+```js
+// Removed in Electron 21
+webContents.on('new-window', (event) => {
+  event.preventDefault()
+})
+
+// Replace with
+webContents.setWindowOpenHandler((details) => {
+  return { action: 'deny' }
+})
+```
+
+### Deprecated: BrowserWindow `scroll-touch-*` events
+
+The `scroll-touch-begin`, `scroll-touch-end` and `scroll-touch-edge` events on
+BrowserWindow are deprecated. Instead, use the newly available [`input-event`
+event](api/web-contents.md#event-input-event) on WebContents.
+
+```js
+// Deprecated
+win.on('scroll-touch-begin', scrollTouchBegin)
+win.on('scroll-touch-edge', scrollTouchEdge)
+win.on('scroll-touch-end', scrollTouchEnd)
+
+// Replace with
+win.webContents.on('input-event', (_, event) => {
+  if (event.type === 'gestureScrollBegin') {
+    scrollTouchBegin()
+  } else if (event.type === 'gestureScrollUpdate') {
+    scrollTouchEdge()
+  } else if (event.type === 'gestureScrollEnd') {
+    scrollTouchEnd()
+  }
+})
+```
+
+## Planned Breaking API Changes (20.0)
+
+### Behavior Changed: V8 Memory Cage enabled
+
+The V8 memory cage has been enabled, which has implications for native modules
+which wrap non-V8 memory with `ArrayBuffer` or `Buffer`. See the [blog post
+about the V8 memory cage](https://www.electronjs.org/blog/v8-memory-cage) for
+more details.
+
+### API Changed: `webContents.printToPDF()`
+
+`webContents.printToPDF()` has been modified to conform to [`Page.printToPDF`](https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-printToPDF) in the Chrome DevTools Protocol. This has been changes in order to
+address changes upstream that made our previous implementation untenable and rife with bugs.
+
+**Arguments Changed**
+
+* `pageRanges`
+
+**Arguments Removed**
+
+* `printSelectionOnly`
+* `marginsType`
+* `headerFooter`
+* `scaleFactor`
+
+**Arguments Added**
+
+* `headerTemplate`
+* `footerTemplate`
+* `displayHeaderFooter`
+* `margins`
+* `scale`
+* `preferCSSPageSize`
+
+```js
+// Main process
+const { webContents } = require('electron')
+
+webContents.printToPDF({
+  landscape: true,
+  displayHeaderFooter: true,
+  printBackground: true,
+  scale: 2,
+  pageSize: 'Ledger',
+  margins: {
+    top: 2,
+    bottom: 2,
+    left: 2,
+    right: 2
+  },
+  pageRanges: '1-5, 8, 11-13',
+  headerTemplate: '<h1>Title</h1>',
+  footerTemplate: '<div><span class="pageNumber"></span></div>',
+  preferCSSPageSize: true
+}).then(data => {
+  fs.writeFile(pdfPath, data, (error) => {
+    if (error) throw error
+    console.log(`Wrote PDF successfully to ${pdfPath}`)
+  })
+}).catch(error => {
+  console.log(`Failed to write PDF to ${pdfPath}: `, error)
+})
+```
+
+### Default Changed: renderers without `nodeIntegration: true` are sandboxed by default
+
+Previously, renderers that specified a preload script defaulted to being
+unsandboxed. This meant that by default, preload scripts had access to Node.js.
+In Electron 20, this default has changed. Beginning in Electron 20, renderers
+will be sandboxed by default, unless `nodeIntegration: true` or `sandbox: false`
+is specified.
+
+If your preload scripts do not depend on Node, no action is needed. If your
+preload scripts _do_ depend on Node, either refactor them to remove Node usage
+from the renderer, or explicitly specify `sandbox: false` for the relevant
+renderers.
+
+### Removed: `skipTaskbar` on Linux
+
+On X11, `skipTaskbar` sends a `_NET_WM_STATE_SKIP_TASKBAR` message to the X11
+window manager. There is not a direct equivalent for Wayland, and the known
+workarounds have unacceptable tradeoffs (e.g. Window.is_skip_taskbar in GNOME
+requires unsafe mode), so Electron is unable to support this feature on Linux.
+
+### API Changed: `session.setDevicePermissionHandler(handler)`
+
+The handler invoked when `session.setDevicePermissionHandler(handler)` is used
+has a change to its arguments.  This handler no longer is passed a frame
+`[WebFrameMain](api/web-frame-main.md)`, but instead is passed the `origin`, which
+is the origin that is checking for device permission.
+
+## Planned Breaking API Changes (19.0)
+
+### Removed: IA32 Linux binaries
+
+This is a result of Chromium 102.0.4999.0 dropping support for IA32 Linux.
+This concludes the [removal of support for IA32 Linux](#removed-ia32-linux-support).
+
+## Planned Breaking API Changes (18.0)
+
+### Removed: `nativeWindowOpen`
+
+Prior to Electron 15, `window.open` was by default shimmed to use
+`BrowserWindowProxy`. This meant that `window.open('about:blank')` did not work
+to open synchronously scriptable child windows, among other incompatibilities.
+Since Electron 15, `nativeWindowOpen` has been enabled by default.
+
+See the documentation for [window.open in Electron](api/window-open.md)
+for more details.
+
 ## Planned Breaking API Changes (17.0)
 
 ### Removed: `desktopCapturer.getSources` in the renderer
@@ -44,6 +222,16 @@ const desktopCapturer = {
 However, you should consider further restricting the information returned to
 the renderer; for instance, displaying a source selector to the user and only
 returning the selected source.
+
+### Deprecated: `nativeWindowOpen`
+
+Prior to Electron 15, `window.open` was by default shimmed to use
+`BrowserWindowProxy`. This meant that `window.open('about:blank')` did not work
+to open synchronously scriptable child windows, among other incompatibilities.
+Since Electron 15, `nativeWindowOpen` has been enabled by default.
+
+See the documentation for [window.open in Electron](api/window-open.md)
+for more details.
 
 ## Planned Breaking API Changes (16.0)
 
@@ -324,7 +512,7 @@ value.
 In Electron 12, `contextIsolation` will be enabled by default.  To restore
 the previous behavior, `contextIsolation: false` must be specified in WebPreferences.
 
-We [recommend having contextIsolation enabled](tutorial/security.md#3-enable-context-isolation-for-remote-content) for the security of your application.
+We [recommend having contextIsolation enabled](tutorial/security.md#3-enable-context-isolation) for the security of your application.
 
 Another implication is that `require()` cannot be used in the renderer process unless
 `nodeIntegration` is `true` and `contextIsolation` is `false`.
@@ -1154,6 +1342,10 @@ the module's `binding.gyp` must be true (which is the default). If this hook is
 not present, then the native module will fail to load on Windows, with an error
 message like `Cannot find module`. See the [native module
 guide](/docs/tutorial/using-native-node-modules.md) for more.
+
+### Removed: IA32 Linux support
+
+Electron 18 will no longer run on 32-bit Linux systems. See [discontinuing support for 32-bit Linux](https://www.electronjs.org/blog/linux-32bit-support) for more information.
 
 ## Breaking API Changes (3.0)
 

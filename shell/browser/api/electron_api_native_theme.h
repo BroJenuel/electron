@@ -11,9 +11,7 @@
 #include "ui/native_theme/native_theme.h"
 #include "ui/native_theme/native_theme_observer.h"
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 class NativeTheme : public gin::Wrappable<NativeTheme>,
                     public gin_helper::EventEmitterMixin<NativeTheme>,
@@ -38,7 +36,7 @@ class NativeTheme : public gin::Wrappable<NativeTheme>,
   ~NativeTheme() override;
 
   void SetThemeSource(ui::NativeTheme::ThemeSource override);
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   void UpdateMacOSAppearanceForOverrideValue(
       ui::NativeTheme::ThemeSource override);
 #endif
@@ -46,6 +44,7 @@ class NativeTheme : public gin::Wrappable<NativeTheme>,
   bool ShouldUseDarkColors();
   bool ShouldUseHighContrastColors();
   bool ShouldUseInvertedColorScheme();
+  bool InForcedColorsMode();
 
   // ui::NativeThemeObserver:
   void OnNativeThemeUpdated(ui::NativeTheme* theme) override;
@@ -56,9 +55,7 @@ class NativeTheme : public gin::Wrappable<NativeTheme>,
   ui::NativeTheme* web_theme_;
 };
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 namespace gin {
 

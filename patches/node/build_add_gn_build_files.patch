@@ -7,12 +7,12 @@ This adds GN build files for Node, so we don't have to build with GYP.
 
 diff --git a/BUILD.gn b/BUILD.gn
 new file mode 100644
-index 0000000000000000000000000000000000000000..d0641c5cbc3c527ce7a73d12118fb42db325be01
+index 0000000000000000000000000000000000000000..3ae9b93649bb404fbf04dea52ecaa7d664ff03ee
 --- /dev/null
 +++ b/BUILD.gn
-@@ -0,0 +1,393 @@
-+import("//electron/build/asar.gni")
+@@ -0,0 +1,440 @@
 +import("//v8/gni/v8.gni")
++import("node.gni")
 +
 +declare_args() {
 +  # Enable the V8 inspector protocol for use with node.
@@ -53,6 +53,26 @@ index 0000000000000000000000000000000000000000..d0641c5cbc3c527ce7a73d12118fb42d
 +
 +  # Allows embedders to override the NODE_MODULE_VERSION define
 +  node_module_version = ""
++
++  # Allows downstream packagers (eg. Linux distributions) to build Electron against system shared libraries.
++  use_system_cares = false
++  use_system_nghttp2 = false
++  use_system_llhttp = false
++  use_system_histogram = false
++}
++
++if (is_linux) {
++ import("//build/config/linux/pkg_config.gni")
++ if (use_system_cares) {
++  pkg_config("cares") {
++    packages = [ "libcares" ]
++  }
++ }
++ if (use_system_nghttp2) {
++  pkg_config("nghttp2") {
++    packages = [ "libnghttp2" ]
++  }
++ }
 +}
 +
 +assert(!node_use_dtrace, "node_use_dtrace not supported in GN")
@@ -192,20 +212,35 @@ index 0000000000000000000000000000000000000000..d0641c5cbc3c527ce7a73d12118fb42d
 +  }
 +}
 +
++executable("overlapped-checker") {
++  sources = []
++  if (is_win) {
++    sources += [ "test/overlapped-checker/main_win.c" ]
++  } else {
++    sources += [ "test/overlapped-checker/main_unix.c" ]
++  }
++}
++
 +component("node_lib") {
 +  deps = [
 +    ":node_js2c",
-+    "deps/cares",
-+    "deps/histogram",
 +    "deps/googletest:gtest",
-+    "deps/llhttp",
-+    "deps/nghttp2",
 +    "deps/uvwasi",
 +    "//third_party/zlib",
 +    "//third_party/brotli:dec",
 +    "//third_party/brotli:enc",
 +    "//v8:v8_libplatform",
 +  ]
++  if (use_system_cares) {
++    configs += [ ":cares" ]
++  } else {
++    deps += [ "deps/cares" ]
++  }
++  if (use_system_nghttp2) {
++    configs += [ ":nghttp2" ]
++  } else {
++    deps += [ "deps/nghttp2" ]
++  }
 +  public_deps = [
 +    "deps/uv",
 +    "//electron:electron_js2c",
@@ -215,6 +250,17 @@ index 0000000000000000000000000000000000000000..d0641c5cbc3c527ce7a73d12118fb42d
 +  public_configs = [ ":node_lib_config" ]
 +  include_dirs = [ "src" ]
 +  libs = []
++  if (use_system_llhttp) {
++    libs += [ "llhttp" ]
++  } else {
++    deps += [ "deps/llhttp" ]
++  }
++  if (use_system_histogram) {
++    libs += [ "hdr_histogram" ]
++    include_dirs += [ "/usr/include/hdr" ]
++  } else {
++    deps += [ "deps/histogram" ]
++  }
 +  frameworks = []
 +  cflags_cc = [
 +    "-Wno-deprecated-declarations",
@@ -226,6 +272,7 @@ index 0000000000000000000000000000000000000000..d0641c5cbc3c527ce7a73d12118fb42d
 +    "-Wno-unused-label",
 +    "-Wno-unused-private-field",
 +    "-Wno-unused-variable",
++    "-Wno-shadow",
 +  ]
 +
 +  if (v8_enable_i18n_support) {
@@ -406,19 +453,16 @@ index 0000000000000000000000000000000000000000..d0641c5cbc3c527ce7a73d12118fb42d
 +}
 diff --git a/deps/cares/BUILD.gn b/deps/cares/BUILD.gn
 new file mode 100644
-index 0000000000000000000000000000000000000000..8e0aa4b7a858ab432dca9da9ead9fcf44f6009f4
+index 0000000000000000000000000000000000000000..71a37834f4e693c190eb7e7d04e3f5ce67c487ad
 --- /dev/null
 +++ b/deps/cares/BUILD.gn
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,134 @@
 +config("cares_config") {
 +  include_dirs = [ "include", "src/lib" ]
 +}
 +static_library("cares") {
 +  defines = [ "CARES_STATICLIB" ]
-+  include_dirs = [
-+    "include",
-+    "src/lib",
-+  ]
++  include_dirs = [ "include" ]
 +  public_configs = [ ":cares_config" ]
 +
 +  libs = []
@@ -431,8 +475,11 @@ index 0000000000000000000000000000000000000000..8e0aa4b7a858ab432dca9da9ead9fcf4
 +  sources = [
 +    "include/ares.h",
 +    "include/ares_dns.h",
++    "include/ares_nameser.h",
 +    "include/ares_rules.h",
 +    "include/ares_version.h",
++    "src/lib/ares__addrinfo2hostent.c",
++    "src/lib/ares__addrinfo_localhost.c",
 +    "src/lib/ares_android.c",
 +    "src/lib/ares_cancel.c",
 +    "src/lib/ares__close_sockets.c",
@@ -475,6 +522,7 @@ index 0000000000000000000000000000000000000000..8e0aa4b7a858ab432dca9da9ead9fcf4
 +    "src/lib/ares_parse_soa_reply.c",
 +    "src/lib/ares_parse_srv_reply.c",
 +    "src/lib/ares_parse_txt_reply.c",
++    "src/lib/ares_parse_uri_reply.c",
 +    "src/lib/ares_platform.h",
 +    "src/lib/ares_private.h",
 +    "src/lib/ares_process.c",
@@ -661,10 +709,10 @@ index 0000000000000000000000000000000000000000..fb000f8ee7647c375bc190d1729d67bb
 +}
 diff --git a/deps/nghttp2/BUILD.gn b/deps/nghttp2/BUILD.gn
 new file mode 100644
-index 0000000000000000000000000000000000000000..8bfecba74d4d90e9fbf0e2cd301118e4adc6cba8
+index 0000000000000000000000000000000000000000..9abde472d88923db835b12982b7f2ccb1f260196
 --- /dev/null
 +++ b/deps/nghttp2/BUILD.gn
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,47 @@
 +config("nghttp2_config") {
 +  defines = [ "NGHTTP2_STATICLIB" ]
 +  include_dirs = [ "lib/includes" ]
@@ -675,11 +723,9 @@ index 0000000000000000000000000000000000000000..8bfecba74d4d90e9fbf0e2cd301118e4
 +    "_U_",
 +    "BUILDING_NGHTTP2",
 +    "NGHTTP2_STATICLIB",
++    "HAVE_CONFIG_H",
 +  ]
 +  include_dirs = [ "lib/includes" ]
-+  if (is_win) {
-+    defines += [ "HAVE_CONFIG_H" ]
-+  }
 +
 +  cflags_c = [
 +    "-Wno-implicit-function-declaration",
@@ -716,10 +762,10 @@ index 0000000000000000000000000000000000000000..8bfecba74d4d90e9fbf0e2cd301118e4
 +}
 diff --git a/deps/uv/BUILD.gn b/deps/uv/BUILD.gn
 new file mode 100644
-index 0000000000000000000000000000000000000000..b8deb68cebcf5ac9b831201332edf8c509a7d4c8
+index 0000000000000000000000000000000000000000..d6bed57461820ce08391fc424a1f842bd282fa75
 --- /dev/null
 +++ b/deps/uv/BUILD.gn
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,196 @@
 +config("libuv_config") {
 +  include_dirs = [ "include" ]
 +
@@ -769,6 +815,7 @@ index 0000000000000000000000000000000000000000..b8deb68cebcf5ac9b831201332edf8c5
 +    "-Wno-unreachable-code",
 +    "-Wno-unreachable-code-return",
 +    "-Wno-unused-but-set-variable",
++    "-Wno-shadow",
 +  ]
 +
 +  libs = []
@@ -961,10 +1008,10 @@ index 0000000000000000000000000000000000000000..2c9d2826c85bdd033f1df1d6188df636
 +}
 diff --git a/filenames.json b/filenames.json
 new file mode 100644
-index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478a4b06ae5
+index 0000000000000000000000000000000000000000..13fd1469ef0aa33853ddc6f31eda5b15f6312138
 --- /dev/null
 +++ b/filenames.json
-@@ -0,0 +1,603 @@
+@@ -0,0 +1,625 @@
 +// This file is automatically generated by generate_gn_filenames_json.py
 +// DO NOT EDIT
 +{
@@ -993,6 +1040,7 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +        "//v8/include/v8-date.h",
 +        "//v8/include/v8-debug.h",
 +        "//v8/include/v8-embedder-heap.h",
++        "//v8/include/v8-embedder-state-scope.h",
 +        "//v8/include/v8-exception.h",
 +        "//v8/include/v8-extension.h",
 +        "//v8/include/v8-external.h",
@@ -1099,6 +1147,7 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +    "lib/child_process.js",
 +    "lib/assert.js",
 +    "lib/_tls_wrap.js",
++    "lib/test.js",
 +    "lib/http2.js",
 +    "lib/inspector.js",
 +    "lib/os.js",
@@ -1187,12 +1236,18 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +    "lib/internal/blob.js",
 +    "lib/internal/socket_list.js",
 +    "lib/internal/socketaddress.js",
++    "lib/internal/promise_hooks.js",
 +    "lib/internal/stream_base_commons.js",
 +    "lib/internal/url.js",
 +    "lib/internal/async_hooks.js",
 +    "lib/internal/http.js",
 +    "lib/internal/buffer.js",
 +    "lib/internal/trace_events_async_hooks.js",
++    "lib/internal/v8/startup_snapshot.js",
++    "lib/internal/test_runner/test.js",
++    "lib/internal/test_runner/harness.js",
++    "lib/internal/test_runner/utils.js",
++    "lib/internal/test_runner/tap_stream.js",
 +    "lib/internal/crypto/sig.js",
 +    "lib/internal/crypto/rsa.js",
 +    "lib/internal/crypto/aes.js",
@@ -1200,6 +1255,7 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +    "lib/internal/crypto/scrypt.js",
 +    "lib/internal/crypto/random.js",
 +    "lib/internal/crypto/keys.js",
++    "lib/internal/crypto/cfrg.js",
 +    "lib/internal/crypto/x509.js",
 +    "lib/internal/crypto/certificate.js",
 +    "lib/internal/crypto/ec.js",
@@ -1211,7 +1267,6 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +    "lib/internal/crypto/hash.js",
 +    "lib/internal/crypto/pbkdf2.js",
 +    "lib/internal/crypto/webcrypto.js",
-+    "lib/internal/crypto/dsa.js",
 +    "lib/internal/crypto/hashnames.js",
 +    "lib/internal/cluster/shared_handle.js",
 +    "lib/internal/cluster/round_robin_handle.js",
@@ -1219,12 +1274,14 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +    "lib/internal/cluster/primary.js",
 +    "lib/internal/cluster/utils.js",
 +    "lib/internal/cluster/child.js",
++    "lib/internal/webstreams/compression.js",
 +    "lib/internal/webstreams/util.js",
 +    "lib/internal/webstreams/writablestream.js",
 +    "lib/internal/webstreams/readablestream.js",
 +    "lib/internal/webstreams/queuingstrategies.js",
 +    "lib/internal/webstreams/encoding.js",
 +    "lib/internal/webstreams/transformstream.js",
++    "lib/internal/webstreams/adapters.js",
 +    "lib/internal/webstreams/transfer.js",
 +    "lib/internal/bootstrap/loaders.js",
 +    "lib/internal/bootstrap/pre_execution.js",
@@ -1242,12 +1299,15 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +    "lib/internal/util/debuglog.js",
 +    "lib/internal/util/inspect.js",
 +    "lib/internal/util/iterable_weak_map.js",
++    "lib/internal/util/parse_args/utils.js",
++    "lib/internal/util/parse_args/parse_args.js",
 +    "lib/internal/streams/add-abort-signal.js",
 +    "lib/internal/streams/compose.js",
 +    "lib/internal/streams/duplexify.js",
 +    "lib/internal/streams/destroy.js",
 +    "lib/internal/streams/legacy.js",
 +    "lib/internal/streams/passthrough.js",
++    "lib/internal/streams/operators.js",
 +    "lib/internal/streams/readable.js",
 +    "lib/internal/streams/from.js",
 +    "lib/internal/streams/writable.js",
@@ -1259,6 +1319,7 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +    "lib/internal/streams/lazy_transform.js",
 +    "lib/internal/streams/duplex.js",
 +    "lib/internal/streams/pipeline.js",
++    "lib/internal/readline/interface.js",
 +    "lib/internal/readline/utils.js",
 +    "lib/internal/readline/emitKeypressEvents.js",
 +    "lib/internal/readline/callbacks.js",
@@ -1289,20 +1350,26 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +    "lib/internal/main/eval_string.js",
 +    "lib/internal/main/check_syntax.js",
 +    "lib/internal/main/prof_process.js",
++    "lib/internal/main/test_runner.js",
 +    "lib/internal/main/worker_thread.js",
++    "lib/internal/main/mksnapshot.js",
 +    "lib/internal/main/inspect.js",
 +    "lib/internal/main/eval_stdin.js",
 +    "lib/internal/main/run_main_module.js",
 +    "lib/internal/modules/run_main.js",
 +    "lib/internal/modules/package_json_reader.js",
 +    "lib/internal/modules/esm/module_job.js",
-+    "lib/internal/modules/esm/get_source.js",
++    "lib/internal/modules/esm/assert.js",
++    "lib/internal/modules/esm/fetch_module.js",
 +    "lib/internal/modules/esm/translators.js",
 +    "lib/internal/modules/esm/resolve.js",
 +    "lib/internal/modules/esm/create_dynamic_module.js",
 +    "lib/internal/modules/esm/load.js",
++    "lib/internal/modules/esm/handle_process_exit.js",
++    "lib/internal/modules/esm/initialize_import_meta.js",
 +    "lib/internal/modules/esm/module_map.js",
 +    "lib/internal/modules/esm/get_format.js",
++    "lib/internal/modules/esm/formats.js",
 +    "lib/internal/modules/esm/loader.js",
 +    "lib/internal/modules/cjs/helpers.js",
 +    "lib/internal/modules/cjs/loader.js",
@@ -1329,6 +1396,7 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +    "lib/internal/perf/utils.js",
 +    "lib/internal/perf/observe.js",
 +    "lib/internal/perf/event_loop_delay.js",
++    "lib/internal/perf/resource_timing.js",
 +    "lib/internal/perf/event_loop_utilization.js",
 +    "lib/internal/policy/manifest.js",
 +    "lib/internal/policy/sri.js",
@@ -1361,7 +1429,8 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +    "deps/acorn/acorn/dist/acorn.js",
 +    "deps/acorn/acorn-walk/dist/walk.js",
 +    "deps/cjs-module-lexer/lexer.js",
-+    "deps/cjs-module-lexer/dist/lexer.js"
++    "deps/cjs-module-lexer/dist/lexer.js",
++    "deps/undici/undici.js"
 +  ],
 +  "node_sources": [
 +    "src/api/async_resource.cc",
@@ -1464,8 +1533,6 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +    "src/aliased_buffer.h",
 +    "src/aliased_struct.h",
 +    "src/aliased_struct-inl.h",
-+    "src/allocated_buffer.h",
-+    "src/allocated_buffer-inl.h",
 +    "src/async_wrap.h",
 +    "src/async_wrap-inl.h",
 +    "src/base_object.h",
@@ -1530,6 +1597,7 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +    "src/node_revert.h",
 +    "src/node_root_certs.h",
 +    "src/node_snapshotable.h",
++    "src/node_snapshot_builder.h",
 +    "src/node_sockaddr.h",
 +    "src/node_sockaddr-inl.h",
 +    "src/node_stat_watcher.h",
@@ -1561,12 +1629,48 @@ index 0000000000000000000000000000000000000000..e2aec71226f25645b188c2c6d8f89478
 +    "src/tracing/trace_event_common.h",
 +    "src/tracing/traced_value.h",
 +    "src/timer_wrap.h",
++    "src/timer_wrap-inl.h",
 +    "src/tty_wrap.h",
 +    "src/udp_wrap.h",
 +    "src/util.h",
 +    "src/util-inl.h",
 +    "//v8/include/v8.h"
 +  ]
++}
+diff --git a/node.gni b/node.gni
+new file mode 100644
+index 0000000000000000000000000000000000000000..9b1a4048a4a64c36d88de0bbe1a548c906aaa22c
+--- /dev/null
++++ b/node.gni
+@@ -0,0 +1,29 @@
++# Run an action with a given working directory. Behaves identically to the
++# action() target type, with the exception that it changes directory before
++# running the script.
++#
++# Parameters:
++#   cwd [required]: Directory to change to before running the script.
++template("chdir_action") {
++  action(target_name) {
++    forward_variables_from(invoker,
++                           "*",
++                           [
++                             "script",
++                             "args",
++                           ])
++    assert(defined(cwd), "Need cwd in $target_name")
++    script = "//electron/build/run-in-dir.py"
++    if (defined(sources)) {
++      sources += [ invoker.script ]
++    } else {
++      assert(defined(inputs))
++      inputs += [ invoker.script ]
++    }
++    args = [
++      rebase_path(cwd),
++      rebase_path(invoker.script),
++    ]
++    args += invoker.args
++  }
 +}
 diff --git a/src/inspector/BUILD.gn b/src/inspector/BUILD.gn
 new file mode 100644
@@ -1774,7 +1878,7 @@ index 0000000000000000000000000000000000000000..d1d6b51e8c0c5bc6a5d09e217eb30483
 +  args = rebase_path(inputs + outputs, root_build_dir)
 +}
 diff --git a/src/node_version.h b/src/node_version.h
-index 08e957472cfeca84af8cdc951af3c0de99c7b56c..330d77e868a50e1d0b71d773ab6b4b337ab20428 100644
+index aea46f3dad19d604d76b6726ce46141be48746c4..8620780de82f08940c40bddc449d281e4e348736 100644
 --- a/src/node_version.h
 +++ b/src/node_version.h
 @@ -89,7 +89,10 @@
@@ -1790,11 +1894,11 @@ index 08e957472cfeca84af8cdc951af3c0de99c7b56c..330d77e868a50e1d0b71d773ab6b4b33
  // which the Node binary being built supports.
 diff --git a/tools/generate_gn_filenames_json.py b/tools/generate_gn_filenames_json.py
 new file mode 100755
-index 0000000000000000000000000000000000000000..8f884a41f57630ac432eb85ebfc9b8bc82cddaca
+index 0000000000000000000000000000000000000000..87621ba1d7f1c80aadb81461824b0c2edab1de22
 --- /dev/null
 +++ b/tools/generate_gn_filenames_json.py
 @@ -0,0 +1,75 @@
-+#!/usr/bin/env python
++#!/usr/bin/env python3
 +import json
 +import os
 +import sys
@@ -1871,11 +1975,11 @@ index 0000000000000000000000000000000000000000..8f884a41f57630ac432eb85ebfc9b8bc
 +    f.write('\n')
 diff --git a/tools/generate_node_version_header.py b/tools/generate_node_version_header.py
 new file mode 100755
-index 0000000000000000000000000000000000000000..3088ae4bdf814ae255c9805ebd393b2eee17e941
+index 0000000000000000000000000000000000000000..2a92eccfa582df361f2a889c0d9b32c1059baa7d
 --- /dev/null
 +++ b/tools/generate_node_version_header.py
 @@ -0,0 +1,25 @@
-+#!/usr/bin/env python
++#!/usr/bin/env python3
 +import re
 +import sys
 +
@@ -1901,10 +2005,10 @@ index 0000000000000000000000000000000000000000..3088ae4bdf814ae255c9805ebd393b2e
 +
 +  out_file.writelines(new_contents)
 diff --git a/tools/install.py b/tools/install.py
-index 41cc1cbc60a9480cc08df3aa0ebe582c2becc3a2..1256a61024e27506ae14405abc37d0a11f83fc64 100755
+index a6d1f8b3caa8e24148b1930ea109508f8e612735..c80c1b8202ba59bd63340baca36df8bca5e1f81d 100755
 --- a/tools/install.py
 +++ b/tools/install.py
-@@ -170,17 +170,71 @@ def files(action):
+@@ -202,17 +202,72 @@ def files(action):
  def headers(action):
    def wanted_v8_headers(files_arg, dest):
      v8_headers = [
@@ -1931,6 +2035,7 @@ index 41cc1cbc60a9480cc08df3aa0ebe582c2becc3a2..1256a61024e27506ae14405abc37d0a1
 +      '../../v8/include/v8-date.h',
 +      '../../v8/include/v8-debug.h',
 +      '../../v8/include/v8-embedder-heap.h',
++      '../../v8/include/v8-embedder-state-scope.h',
 +      '../../v8/include/v8-exception.h',
 +      '../../v8/include/v8-extension.h',
 +      '../../v8/include/v8-external.h',
@@ -1986,7 +2091,7 @@ index 41cc1cbc60a9480cc08df3aa0ebe582c2becc3a2..1256a61024e27506ae14405abc37d0a1
      files_arg = [name for name in files_arg if name in v8_headers]
      action(files_arg, dest)
  
-@@ -201,7 +255,7 @@ def headers(action):
+@@ -239,7 +294,7 @@ def headers(action):
    if sys.platform.startswith('aix'):
      action(['out/Release/node.exp'], 'include/node/')
  

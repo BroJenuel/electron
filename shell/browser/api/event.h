@@ -13,7 +13,7 @@ namespace gin_helper {
 
 class Event : public gin::Wrappable<Event> {
  public:
-  using InvokeCallback = electron::mojom::ElectronBrowser::InvokeCallback;
+  using InvokeCallback = electron::mojom::ElectronApiIPC::InvokeCallback;
 
   static gin::WrapperInfo kWrapperInfo;
 
@@ -43,7 +43,7 @@ class Event : public gin::Wrappable<Event> {
   const char* GetTypeName() override;
 
  private:
-  // Replyer for the synchronous messages.
+  // Replier for the synchronous messages.
   InvokeCallback callback_;
 };
 

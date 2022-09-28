@@ -11,6 +11,7 @@
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/shared_cors_origin_access_list.h"
 #include "electron/fuses.h"
+#include "net/http/http_util.h"
 #include "net/net_buildflags.h"
 #include "services/network/network_service.h"
 #include "services/network/public/cpp/cors/origin_access_list.h"
@@ -23,11 +24,11 @@ namespace electron {
 namespace {
 
 bool ShouldTriggerNetworkDataMigration() {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // On Windows, if sandbox enabled means data must be migrated.
   if (SystemNetworkContextManager::IsNetworkSandboxEnabled())
     return true;
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
   if (base::FeatureList::IsEnabled(features::kTriggerNetworkDataMigration))
     return true;
   return false;
@@ -79,14 +80,14 @@ void NetworkContextService::ConfigureNetworkContextParams(
   // Configure on-disk storage for persistent sessions.
   if (!in_memory) {
     // Configure the HTTP cache path and size.
-    network_context_params->http_cache_path =
+    network_context_params->http_cache_directory =
         path.Append(chrome::kCacheDirname);
     network_context_params->http_cache_max_size =
         browser_context_->GetMaxCacheSize();
 
     network_context_params->file_paths =
         network::mojom::NetworkContextFilePaths::New();
-    network_context_params->file_paths->data_path =
+    network_context_params->file_paths->data_directory =
         path.Append(chrome::kNetworkDataDirname);
     network_context_params->file_paths->unsandboxed_data_path = path;
     network_context_params->file_paths->trigger_migration =

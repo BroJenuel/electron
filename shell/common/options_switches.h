@@ -60,22 +60,20 @@ extern const char kRoundedCorners[];
 extern const char ktitleBarOverlay[];
 extern const char kOverlayButtonColor[];
 extern const char kOverlaySymbolColor[];
+extern const char kOverlayHeight[];
 
 // WebPreferences.
 extern const char kZoomFactor[];
 extern const char kPreloadScript[];
 extern const char kPreloadScripts[];
-extern const char kPreloadURL[];
 extern const char kNodeIntegration[];
 extern const char kContextIsolation[];
 extern const char kExperimentalFeatures[];
-extern const char kOpenerID[];
 extern const char kScrollBounce[];
 extern const char kEnableBlinkFeatures[];
 extern const char kDisableBlinkFeatures[];
 extern const char kNodeIntegrationInWorker[];
 extern const char kWebviewTag[];
-extern const char kNativeWindowOpen[];
 extern const char kCustomArgs[];
 extern const char kPlugins[];
 extern const char kSandbox[];

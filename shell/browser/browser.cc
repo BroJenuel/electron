@@ -41,7 +41,7 @@ void RunQuitClosure(base::OnceClosure quit) {
 
 }  // namespace
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 Browser::LaunchItem::LaunchItem() = default;
 Browser::LaunchItem::~LaunchItem() = default;
 Browser::LaunchItem::LaunchItem(const LaunchItem& other) = default;
@@ -65,7 +65,7 @@ Browser* Browser::Get() {
   return ElectronBrowserMainParts::Get()->browser();
 }
 
-#if defined(OS_WIN) || defined(OS_LINUX)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
 void Browser::Focus(gin::Arguments* args) {
   // Focus on the first visible window.
   for (auto* const window : WindowList::GetWindows()) {
@@ -184,7 +184,7 @@ void Browser::WillFinishLaunching() {
     observer.OnWillFinishLaunching();
 }
 
-void Browser::DidFinishLaunching(base::DictionaryValue launch_info) {
+void Browser::DidFinishLaunching(base::Value::Dict launch_info) {
   // Make sure the userData directory is created.
   base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::FilePath user_data;
@@ -196,7 +196,7 @@ void Browser::DidFinishLaunching(base::DictionaryValue launch_info) {
     ready_promise_->Resolve();
   }
   for (BrowserObserver& observer : observers_)
-    observer.OnFinishLaunching(launch_info);
+    observer.OnFinishLaunching(launch_info.Clone());
 }
 
 v8::Local<v8::Value> Browser::WhenReady(v8::Isolate* isolate) {
@@ -275,7 +275,7 @@ void Browser::OnWindowAllClosed() {
   }
 }
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 void Browser::NewWindowForTab() {
   for (BrowserObserver& observer : observers_)
     observer.OnNewWindowForTab();

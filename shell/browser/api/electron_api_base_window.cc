@@ -32,12 +32,12 @@
 #include "shell/browser/native_window_views.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "shell/browser/ui/win/taskbar_host.h"
 #include "ui/base/win/shell.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 namespace gin {
 
 template <>
@@ -58,9 +58,7 @@ struct Converter<electron::TaskbarHost::ThumbarButton> {
 }  // namespace gin
 #endif
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 namespace {
 
@@ -209,7 +207,6 @@ void BaseWindow::OnWindowWillResize(const gfx::Rect& new_bounds,
                                     const gfx::ResizeEdge& edge,
                                     bool* prevent_default) {
   v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
-  v8::Locker locker(isolate);
   v8::HandleScope handle_scope(isolate);
   gin_helper::Dictionary info = gin::Dictionary::CreateEmpty(isolate);
   info.Set("edge", edge);
@@ -250,14 +247,6 @@ void BaseWindow::OnWindowLeaveFullScreen() {
   Emit("leave-full-screen");
 }
 
-void BaseWindow::OnWindowScrollTouchBegin() {
-  Emit("scroll-touch-begin");
-}
-
-void BaseWindow::OnWindowScrollTouchEnd() {
-  Emit("scroll-touch-end");
-}
-
 void BaseWindow::OnWindowSwipe(const std::string& direction) {
   Emit("swipe", direction);
 }
@@ -291,7 +280,7 @@ void BaseWindow::OnExecuteAppCommand(const std::string& command_name) {
 }
 
 void BaseWindow::OnTouchBarItemResult(const std::string& item_id,
-                                      const base::DictionaryValue& details) {
+                                      const base::Value::Dict& details) {
   Emit("-touch-bar-interaction", item_id, details);
 }
 
@@ -305,11 +294,10 @@ void BaseWindow::OnSystemContextMenu(int x, int y, bool* prevent_default) {
   }
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 void BaseWindow::OnWindowMessage(UINT message, WPARAM w_param, LPARAM l_param) {
   if (IsWindowMessageHooked(message)) {
     v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
-    v8::Locker locker(isolate);
     v8::HandleScope scope(isolate);
     messages_callback_map_[message].Run(
         ToBuffer(isolate, static_cast<void*>(&w_param), sizeof(WPARAM)),
@@ -643,11 +631,11 @@ bool BaseWindow::IsTabletMode() const {
 }
 
 void BaseWindow::SetBackgroundColor(const std::string& color_name) {
-  SkColor color = ParseHexColor(color_name);
+  SkColor color = ParseCSSColor(color_name);
   window_->SetBackgroundColor(color);
 }
 
-std::string BaseWindow::GetBackgroundColor() {
+std::string BaseWindow::GetBackgroundColor(gin_helper::Arguments* args) {
   return ToRGBHex(window_->GetBackgroundColor());
 }
 
@@ -757,61 +745,52 @@ void BaseWindow::SetParentWindow(v8::Local<v8::Value> value,
   }
 }
 
-void BaseWindow::SetBrowserView(v8::Local<v8::Value> value) {
+void BaseWindow::SetBrowserView(
+    absl::optional<gin::Handle<BrowserView>> browser_view) {
   ResetBrowserViews();
-  AddBrowserView(value);
+  if (browser_view)
+    AddBrowserView(*browser_view);
 }
 
-void BaseWindow::AddBrowserView(v8::Local<v8::Value> value) {
-  gin::Handle<BrowserView> browser_view;
-  if (value->IsObject() &&
-      gin::ConvertFromV8(isolate(), value, &browser_view)) {
-    auto get_that_view = browser_views_.find(browser_view->ID());
-    if (get_that_view == browser_views_.end()) {
-      // If we're reparenting a BrowserView, ensure that it's detached from
-      // its previous owner window.
-      auto* owner_window = browser_view->owner_window();
-      if (owner_window && owner_window != window_.get()) {
-        owner_window->RemoveBrowserView(browser_view->view());
-        browser_view->SetOwnerWindow(nullptr);
-      }
-
-      window_->AddBrowserView(browser_view->view());
-      browser_view->SetOwnerWindow(window_.get());
-      browser_views_[browser_view->ID()].Reset(isolate(), value);
-    }
-  }
-}
-
-void BaseWindow::RemoveBrowserView(v8::Local<v8::Value> value) {
-  gin::Handle<BrowserView> browser_view;
-  if (value->IsObject() &&
-      gin::ConvertFromV8(isolate(), value, &browser_view)) {
-    auto get_that_view = browser_views_.find(browser_view->ID());
-    if (get_that_view != browser_views_.end()) {
-      window_->RemoveBrowserView(browser_view->view());
+void BaseWindow::AddBrowserView(gin::Handle<BrowserView> browser_view) {
+  auto iter = browser_views_.find(browser_view->ID());
+  if (iter == browser_views_.end()) {
+    // If we're reparenting a BrowserView, ensure that it's detached from
+    // its previous owner window.
+    BaseWindow* owner_window = browser_view->owner_window();
+    if (owner_window) {
+      // iter == browser_views_.end() should imply owner_window != this.
+      DCHECK_NE(owner_window, this);
+      owner_window->RemoveBrowserView(browser_view);
       browser_view->SetOwnerWindow(nullptr);
-      (*get_that_view).second.Reset(isolate(), value);
-      browser_views_.erase(get_that_view);
     }
+
+    window_->AddBrowserView(browser_view->view());
+    browser_view->SetOwnerWindow(this);
+    browser_views_[browser_view->ID()].Reset(isolate(), browser_view.ToV8());
   }
 }
 
-void BaseWindow::SetTopBrowserView(v8::Local<v8::Value> value,
-                                   gin_helper::Arguments* args) {
-  gin::Handle<BrowserView> browser_view;
-  if (value->IsObject() &&
-      gin::ConvertFromV8(isolate(), value, &browser_view)) {
-    auto* owner_window = browser_view->owner_window();
-    auto get_that_view = browser_views_.find(browser_view->ID());
-    if (get_that_view == browser_views_.end() ||
-        (owner_window && owner_window != window_.get())) {
-      args->ThrowError("Given BrowserView is not attached to the window");
-      return;
-    }
-
-    window_->SetTopBrowserView(browser_view->view());
+void BaseWindow::RemoveBrowserView(gin::Handle<BrowserView> browser_view) {
+  auto iter = browser_views_.find(browser_view->ID());
+  if (iter != browser_views_.end()) {
+    window_->RemoveBrowserView(browser_view->view());
+    browser_view->SetOwnerWindow(nullptr);
+    iter->second.Reset();
+    browser_views_.erase(iter);
   }
+}
+
+void BaseWindow::SetTopBrowserView(gin::Handle<BrowserView> browser_view,
+                                   gin_helper::Arguments* args) {
+  BaseWindow* owner_window = browser_view->owner_window();
+  auto iter = browser_views_.find(browser_view->ID());
+  if (iter == browser_views_.end() || (owner_window && owner_window != this)) {
+    args->ThrowError("Given BrowserView is not attached to the window");
+    return;
+  }
+
+  window_->SetTopBrowserView(browser_view->view());
 }
 
 std::string BaseWindow::GetMediaSourceId() const {
@@ -854,10 +833,10 @@ void BaseWindow::SetVisibleOnAllWorkspaces(bool visible,
   gin_helper::Dictionary options;
   bool visibleOnFullScreen = false;
   bool skipTransformProcessType = false;
-  args->GetNext(&options) &&
-      options.Get("visibleOnFullScreen", &visibleOnFullScreen);
-  args->GetNext(&options) &&
-      options.Get("skipTransformProcessType", &skipTransformProcessType);
+  if (args->GetNext(&options)) {
+    options.Get("visibleOnFullScreen", &visibleOnFullScreen);
+    options.Get("skipTransformProcessType", &skipTransformProcessType);
+  }
   return window_->SetVisibleOnAllWorkspaces(visible, visibleOnFullScreen,
                                             skipTransformProcessType);
 }
@@ -875,7 +854,7 @@ void BaseWindow::SetVibrancy(v8::Isolate* isolate, v8::Local<v8::Value> value) {
   window_->SetVibrancy(type);
 }
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 std::string BaseWindow::GetAlwaysOnTopLevel() {
   return window_->GetAlwaysOnTopLevel();
 }
@@ -1028,7 +1007,7 @@ bool BaseWindow::IsModal() const {
 }
 
 bool BaseWindow::SetThumbarButtons(gin_helper::Arguments* args) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   std::vector<TaskbarHost::ThumbarButton> buttons;
   if (!args->GetNext(&buttons)) {
     args->ThrowError();
@@ -1055,18 +1034,18 @@ void BaseWindow::SetIconImpl(v8::Isolate* isolate,
                                           on_error))
     return;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   static_cast<NativeWindowViews*>(window_.get())
       ->SetIcon(native_image->GetHICON(GetSystemMetrics(SM_CXSMICON)),
                 native_image->GetHICON(GetSystemMetrics(SM_CXICON)));
-#elif defined(OS_LINUX)
+#elif BUILDFLAG(IS_LINUX)
   static_cast<NativeWindowViews*>(window_.get())
       ->SetIcon(native_image->image().AsImageSkia());
 #endif
 }
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 bool BaseWindow::HookWindowMessage(UINT message,
                                    const MessageCallback& callback) {
   messages_callback_map_[message] = callback;
@@ -1131,11 +1110,11 @@ void BaseWindow::ResetBrowserViews() {
         !browser_view.IsEmpty()) {
       // There's a chance that the BrowserView may have been reparented - only
       // reset if the owner window is *this* window.
-      auto* owner_window = browser_view->owner_window();
-      if (owner_window && owner_window == window_.get()) {
-        browser_view->SetOwnerWindow(nullptr);
-        owner_window->RemoveBrowserView(browser_view->view());
-      }
+      BaseWindow* owner_window = browser_view->owner_window();
+      DCHECK_EQ(owner_window, this);
+      browser_view->SetOwnerWindow(nullptr);
+      window_->RemoveBrowserView(browser_view->view());
+      browser_view->SetOwnerWindow(nullptr);
     }
 
     item.second.Reset();
@@ -1266,12 +1245,12 @@ void BaseWindow::BuildPrototype(v8::Isolate* isolate,
                  &BaseWindow::SetVisibleOnAllWorkspaces)
       .SetMethod("isVisibleOnAllWorkspaces",
                  &BaseWindow::IsVisibleOnAllWorkspaces)
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
       .SetMethod("_getAlwaysOnTopLevel", &BaseWindow::GetAlwaysOnTopLevel)
       .SetMethod("setAutoHideCursor", &BaseWindow::SetAutoHideCursor)
 #endif
       .SetMethod("setVibrancy", &BaseWindow::SetVibrancy)
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
       .SetMethod("setTrafficLightPosition",
                  &BaseWindow::SetTrafficLightPosition)
       .SetMethod("getTrafficLightPosition",
@@ -1280,7 +1259,7 @@ void BaseWindow::BuildPrototype(v8::Isolate* isolate,
       .SetMethod("_setTouchBarItems", &BaseWindow::SetTouchBar)
       .SetMethod("_refreshTouchBarItem", &BaseWindow::RefreshTouchBarItem)
       .SetMethod("_setEscapeTouchBarItem", &BaseWindow::SetEscapeTouchBarItem)
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
       .SetMethod("selectPreviousTab", &BaseWindow::SelectPreviousTab)
       .SetMethod("selectNextTab", &BaseWindow::SelectNextTab)
       .SetMethod("mergeAllWindows", &BaseWindow::MergeAllWindows)
@@ -1312,7 +1291,7 @@ void BaseWindow::BuildPrototype(v8::Isolate* isolate,
 #if defined(TOOLKIT_VIEWS)
       .SetMethod("setIcon", &BaseWindow::SetIcon)
 #endif
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       .SetMethod("hookWindowMessage", &BaseWindow::HookWindowMessage)
       .SetMethod("isWindowMessageHooked", &BaseWindow::IsWindowMessageHooked)
       .SetMethod("unhookWindowMessage", &BaseWindow::UnhookWindowMessage)
@@ -1325,9 +1304,7 @@ void BaseWindow::BuildPrototype(v8::Isolate* isolate,
       .SetProperty("id", &BaseWindow::GetID);
 }
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 namespace {
 

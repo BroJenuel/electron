@@ -2,9 +2,11 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file.
 
+#include <iterator>
 #include <utility>
 
 #include "base/hash/hash.h"
+#include "base/run_loop.h"
 #include "electron/buildflags/buildflags.h"
 #include "shell/common/api/electron_api_key_weak_map.h"
 #include "shell/common/gin_converters/content_converter.h"
@@ -102,16 +104,14 @@ void RequestGarbageCollectionForTesting(v8::Isolate* isolate) {
       v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
 }
 
-bool IsSameOrigin(const GURL& l, const GURL& r) {
-  return url::Origin::Create(l).IsSameOriginWith(url::Origin::Create(r));
-}
-
 // This causes a fatal error by creating a circular extension dependency.
 void TriggerFatalErrorForTesting(v8::Isolate* isolate) {
   static const char* aDeps[] = {"B"};
-  v8::RegisterExtension(std::make_unique<v8::Extension>("A", "", 1, aDeps));
+  v8::RegisterExtension(
+      std::make_unique<v8::Extension>("A", "", std::size(aDeps), aDeps));
   static const char* bDeps[] = {"A"};
-  v8::RegisterExtension(std::make_unique<v8::Extension>("B", "", 1, bDeps));
+  v8::RegisterExtension(
+      std::make_unique<v8::Extension>("B", "", std::size(aDeps), bDeps));
   v8::ExtensionConfiguration config(1, bDeps);
   v8::Context::New(isolate, &config);
 }
@@ -132,7 +132,6 @@ void Initialize(v8::Local<v8::Object> exports,
   dict.SetMethod("takeHeapSnapshot", &TakeHeapSnapshot);
   dict.SetMethod("requestGarbageCollectionForTesting",
                  &RequestGarbageCollectionForTesting);
-  dict.SetMethod("isSameOrigin", &IsSameOrigin);
   dict.SetMethod("triggerFatalErrorForTesting", &TriggerFatalErrorForTesting);
   dict.SetMethod("runUntilIdle", &RunUntilIdle);
 }

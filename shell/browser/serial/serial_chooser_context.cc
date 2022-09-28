@@ -15,6 +15,7 @@
 #include "content/public/browser/device_service.h"
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
+#include "shell/browser/electron_permission_manager.h"
 #include "shell/browser/web_contents_permission_helper.h"
 
 namespace electron {
@@ -22,16 +23,16 @@ namespace electron {
 constexpr char kPortNameKey[] = "name";
 constexpr char kTokenKey[] = "token";
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 const char kDeviceInstanceIdKey[] = "device_instance_id";
 #else
 const char kVendorIdKey[] = "vendor_id";
 const char kProductIdKey[] = "product_id";
 const char kSerialNumberKey[] = "serial_number";
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 const char kUsbDriverKey[] = "usb_driver";
-#endif  // defined(OS_MAC)
-#endif  // defined(OS_WIN
+#endif  // BUILDFLAG(IS_MAC)
+#endif  // BUILDFLAG(IS_WIN)
 
 std::string EncodeToken(const base::UnguessableToken& token) {
   const uint64_t data[2] = {token.GetHighForSerialization(),
@@ -66,7 +67,7 @@ base::Value PortInfoToValue(const device::mojom::SerialPortInfo& port) {
     return value;
   }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Windows provides a handy device identifier which we can rely on to be
   // sufficiently stable for identifying devices across restarts.
   value.SetStringKey(kDeviceInstanceIdKey, port.device_instance_id);
@@ -78,60 +79,58 @@ base::Value PortInfoToValue(const device::mojom::SerialPortInfo& port) {
   DCHECK(port.serial_number);
   value.SetStringKey(kSerialNumberKey, *port.serial_number);
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   DCHECK(port.usb_driver_name && !port.usb_driver_name->empty());
   value.SetStringKey(kUsbDriverKey, *port.usb_driver_name);
-#endif  // defined(OS_MAC)
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_MAC)
+#endif  // BUILDFLAG(IS_WIN)
   return value;
 }
 
-SerialChooserContext::SerialChooserContext() = default;
+SerialChooserContext::SerialChooserContext(ElectronBrowserContext* context)
+    : browser_context_(context) {}
 
-SerialChooserContext::~SerialChooserContext() = default;
+SerialChooserContext::~SerialChooserContext() {
+  // Notify observers that the chooser context is about to be destroyed.
+  // Observers must remove themselves from the observer lists.
+  for (auto& observer : port_observer_list_) {
+    observer.OnSerialChooserContextShutdown();
+    DCHECK(!port_observer_list_.HasObserver(&observer));
+  }
+}
 
 void SerialChooserContext::GrantPortPermission(
     const url::Origin& origin,
     const device::mojom::SerialPortInfo& port,
     content::RenderFrameHost* render_frame_host) {
-  base::Value value = PortInfoToValue(port);
-  port_info_.insert({port.token, value.Clone()});
+  port_info_.insert({port.token, port.Clone()});
 
-  if (CanStorePersistentEntry(port)) {
-    auto* web_contents =
-        content::WebContents::FromRenderFrameHost(render_frame_host);
-    auto* permission_helper =
-        WebContentsPermissionHelper::FromWebContents(web_contents);
-    permission_helper->GrantSerialPortPermission(origin, std::move(value),
-                                                 render_frame_host);
-    return;
-  }
-
-  ephemeral_ports_[origin].insert(port.token);
+  auto* permission_manager = static_cast<ElectronPermissionManager*>(
+      browser_context_->GetPermissionControllerDelegate());
+  return permission_manager->GrantDevicePermission(
+      static_cast<blink::PermissionType>(
+          WebContentsPermissionHelper::PermissionType::SERIAL),
+      origin, PortInfoToValue(port), browser_context_);
 }
 
 bool SerialChooserContext::HasPortPermission(
     const url::Origin& origin,
     const device::mojom::SerialPortInfo& port,
     content::RenderFrameHost* render_frame_host) {
-  auto it = ephemeral_ports_.find(origin);
-  if (it != ephemeral_ports_.end()) {
-    const std::set<base::UnguessableToken> ports = it->second;
-    if (base::Contains(ports, port.token))
-      return true;
-  }
+  auto* permission_manager = static_cast<ElectronPermissionManager*>(
+      browser_context_->GetPermissionControllerDelegate());
+  return permission_manager->CheckDevicePermission(
+      static_cast<blink::PermissionType>(
+          WebContentsPermissionHelper::PermissionType::SERIAL),
+      origin, PortInfoToValue(port), browser_context_);
+}
 
-  if (!CanStorePersistentEntry(port)) {
-    return false;
-  }
-
-  auto* web_contents =
-      content::WebContents::FromRenderFrameHost(render_frame_host);
-  auto* permission_helper =
-      WebContentsPermissionHelper::FromWebContents(web_contents);
-  base::Value value = PortInfoToValue(port);
-  return permission_helper->CheckSerialPortPermission(origin, std::move(value),
-                                                      render_frame_host);
+void SerialChooserContext::RevokePortPermissionWebInitiated(
+    const url::Origin& origin,
+    const base::UnguessableToken& token) {
+  auto it = port_info_.find(token);
+  if (it == port_info_.end())
+    return;
 }
 
 // static
@@ -144,7 +143,7 @@ bool SerialChooserContext::CanStorePersistentEntry(
   if (!port.display_name || port.display_name->empty())
     return false;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   return !port.device_instance_id.empty();
 #else
   if (!port.has_vendor_id || !port.has_product_id || !port.serial_number ||
@@ -152,7 +151,7 @@ bool SerialChooserContext::CanStorePersistentEntry(
     return false;
   }
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   // The combination of the standard USB vendor ID, product ID and serial
   // number properties should be enough to uniquely identify a device
   // however recent versions of macOS include built-in drivers for common
@@ -162,10 +161,17 @@ bool SerialChooserContext::CanStorePersistentEntry(
   // USB driver name allows us to distinguish between the two.
   if (!port.usb_driver_name || port.usb_driver_name->empty())
     return false;
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
 
   return true;
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
+}
+
+const device::mojom::SerialPortInfo* SerialChooserContext::GetPortInfo(
+    const base::UnguessableToken& token) {
+  DCHECK(is_initialized_);
+  auto it = port_info_.find(token);
+  return it == port_info_.end() ? nullptr : it->second.get();
 }
 
 device::mojom::SerialPortManager* SerialChooserContext::GetPortManager() {
@@ -186,6 +192,9 @@ base::WeakPtr<SerialChooserContext> SerialChooserContext::AsWeakPtr() {
 }
 
 void SerialChooserContext::OnPortAdded(device::mojom::SerialPortInfoPtr port) {
+  if (!base::Contains(port_info_, port->token))
+    port_info_.insert({port->token, port->Clone()});
+
   for (auto& observer : port_observer_list_)
     observer.OnPortAdded(*port);
 }
@@ -216,15 +225,20 @@ void SerialChooserContext::SetUpPortManagerConnection(
                      base::Unretained(this)));
 
   port_manager_->SetClient(client_receiver_.BindNewPipeAndPassRemote());
+  port_manager_->GetDevices(base::BindOnce(&SerialChooserContext::OnGetDevices,
+                                           weak_factory_.GetWeakPtr()));
+}
+
+void SerialChooserContext::OnGetDevices(
+    std::vector<device::mojom::SerialPortInfoPtr> ports) {
+  for (auto& port : ports)
+    port_info_.insert({port->token, std::move(port)});
+  is_initialized_ = true;
 }
 
 void SerialChooserContext::OnPortManagerConnectionError() {
   port_manager_.reset();
   client_receiver_.reset();
-
-  port_info_.clear();
-
-  ephemeral_ports_.clear();
 }
 
 }  // namespace electron

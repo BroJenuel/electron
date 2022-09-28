@@ -19,6 +19,7 @@
 #include "shell/common/gin_helper/cleaned_up_at_exit.h"
 #include "shell/common/gin_helper/constructible.h"
 #include "shell/common/gin_helper/error_thrower.h"
+#include "shell/common/gin_helper/pinnable.h"
 
 namespace gfx {
 class Image;
@@ -28,9 +29,7 @@ namespace gin_helper {
 class Dictionary;
 }
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 class Menu;
 
@@ -38,6 +37,7 @@ class Tray : public gin::Wrappable<Tray>,
              public gin_helper::EventEmitterMixin<Tray>,
              public gin_helper::Constructible<Tray>,
              public gin_helper::CleanedUpAtExit,
+             public gin_helper::Pinnable<Tray>,
              public TrayIconObserver {
  public:
   // gin_helper::Constructible
@@ -111,8 +111,6 @@ class Tray : public gin::Wrappable<Tray>,
   std::unique_ptr<TrayIcon> tray_icon_;
 };
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 #endif  // ELECTRON_SHELL_BROWSER_API_ELECTRON_API_TRAY_H_

@@ -15,6 +15,8 @@
 #include "shell/browser/ui/autofill_popup.h"
 #include "shell/common/api/api.mojom.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
+#include "ui/color/color_id.h"
+#include "ui/color/color_provider.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/geometry/point.h"
@@ -60,7 +62,7 @@ void CalculatePopupXAndWidthHorizontallyCentered(
 
   // Calculate how much the pop-up needs to grow into the non-preferred
   // direction.
-  int amount_to_grow_in_unpreffered_direction =
+  int amount_to_grow_in_unpreferred_direction =
       std::max(0, popup_width - space_to_grow_in_preferred_direction);
 
   bubble_bounds->set_width(popup_width);
@@ -68,10 +70,10 @@ void CalculatePopupXAndWidthHorizontallyCentered(
     // Note, in RTL the |pop_up_width| must be subtracted to achieve
     // right-alignment of the pop-up with the element.
     bubble_bounds->set_x(preferred_starting_point - popup_width +
-                         amount_to_grow_in_unpreffered_direction);
+                         amount_to_grow_in_unpreferred_direction);
   } else {
     bubble_bounds->set_x(preferred_starting_point -
-                         amount_to_grow_in_unpreffered_direction);
+                         amount_to_grow_in_unpreferred_direction);
   }
 }
 
@@ -310,11 +312,10 @@ const gfx::FontList& AutofillPopup::GetLabelFontListForRow(int index) const {
   return smaller_font_list_;
 }
 
-ui::NativeTheme::ColorId AutofillPopup::GetBackgroundColorIDForRow(
-    int index) const {
+ui::ColorId AutofillPopup::GetBackgroundColorIDForRow(int index) const {
   return (view_ && index == view_->GetSelectedLine())
-             ? ui::NativeTheme::kColorId_ResultsTableHoveredBackground
-             : ui::NativeTheme::kColorId_ResultsTableNormalBackground;
+             ? ui::kColorResultsTableHoveredBackground
+             : ui::kColorResultsTableNormalBackground;
 }
 
 int AutofillPopup::GetLineCount() {

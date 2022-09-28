@@ -33,9 +33,7 @@ class SimpleURLLoader;
 struct ResourceRequest;
 }  // namespace network
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 /** Wraps a SimpleURLLoader to make it usable from JavaScript */
 class SimpleURLLoaderWrapper
@@ -86,10 +84,12 @@ class SimpleURLLoaderWrapper
       const scoped_refptr<net::SSLCertRequestInfo>& cert_info,
       mojo::PendingRemote<network::mojom::ClientCertificateResponder>
           client_cert_responder) override {}
-  void OnClearSiteData(const GURL& url,
-                       const std::string& header_value,
-                       int32_t load_flags,
-                       OnClearSiteDataCallback callback) override;
+  void OnClearSiteData(
+      const GURL& url,
+      const std::string& header_value,
+      int32_t load_flags,
+      const absl::optional<net::CookiePartitionKey>& cookie_partition_key,
+      OnClearSiteDataCallback callback) override;
   void OnLoadingStateUpdate(network::mojom::LoadInfoPtr info,
                             OnLoadingStateUpdateCallback callback) override;
   void OnDataUseUpdate(int32_t network_traffic_annotation_id_hash,
@@ -121,8 +121,6 @@ class SimpleURLLoaderWrapper
   base::WeakPtrFactory<SimpleURLLoaderWrapper> weak_factory_{this};
 };
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 #endif  // ELECTRON_SHELL_BROWSER_API_ELECTRON_API_URL_LOADER_H_

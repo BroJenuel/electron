@@ -21,9 +21,7 @@
 #include "shell/common/gin_helper/function_template_extensions.h"
 #include "shell/common/node_includes.h"
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 namespace {
 
@@ -39,8 +37,6 @@ std::string MessageSourceToString(
     return "console-api";
   if (source == blink::mojom::ConsoleMessageSource::kStorage)
     return "storage";
-  if (source == blink::mojom::ConsoleMessageSource::kAppCache)
-    return "app-cache";
   if (source == blink::mojom::ConsoleMessageSource::kRendering)
     return "rendering";
   if (source == blink::mojom::ConsoleMessageSource::kSecurity)
@@ -164,6 +160,4 @@ const char* ServiceWorkerContext::GetTypeName() {
   return "ServiceWorkerContext";
 }
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api

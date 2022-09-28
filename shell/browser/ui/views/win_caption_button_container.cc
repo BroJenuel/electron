@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Modified from
+// chrome/browser/ui/views/frame/glass_browser_caption_button_container.cc
+
 #include "shell/browser/ui/views/win_caption_button_container.h"
 
 #include <memory>
@@ -11,6 +14,7 @@
 #include "shell/browser/ui/views/win_frame_view.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/strings/grit/ui_strings.h"
+#include "ui/views/background.h"
 #include "ui/views/layout/flex_layout.h"
 #include "ui/views/view_class_properties.h"
 
@@ -96,6 +100,18 @@ int WinCaptionButtonContainer::NonClientHitTest(const gfx::Point& point) const {
   return HTCAPTION;
 }
 
+gfx::Size WinCaptionButtonContainer::GetButtonSize() const {
+  // Close button size is set the same as all the buttons
+  return close_button_->GetSize();
+}
+
+void WinCaptionButtonContainer::SetButtonSize(gfx::Size size) {
+  minimize_button_->SetSize(size);
+  maximize_button_->SetSize(size);
+  restore_button_->SetSize(size);
+  close_button_->SetSize(size);
+}
+
 void WinCaptionButtonContainer::ResetWindowControls() {
   minimize_button_->SetState(views::Button::STATE_NORMAL);
   maximize_button_->SetState(views::Button::STATE_NORMAL);
@@ -113,6 +129,8 @@ void WinCaptionButtonContainer::AddedToWidget() {
   UpdateButtons();
 
   if (frame_view_->window()->IsWindowControlsOverlayEnabled()) {
+    SetBackground(views::CreateSolidBackground(
+        frame_view_->window()->overlay_button_color()));
     SetPaintToLayer();
   }
 }
@@ -133,11 +151,31 @@ void WinCaptionButtonContainer::UpdateButtons() {
   restore_button_->SetVisible(is_maximized);
   maximize_button_->SetVisible(!is_maximized);
 
+  const bool minimizable = frame_view_->window()->IsMinimizable();
+  minimize_button_->SetEnabled(minimizable);
+
   // In touch mode, windows cannot be taken out of fullscreen or tiled mode, so
   // the maximize/restore button should be disabled.
   const bool is_touch = ui::TouchUiController::Get()->touch_ui();
   restore_button_->SetEnabled(!is_touch);
-  maximize_button_->SetEnabled(!is_touch);
+
+  // In touch mode, windows cannot be taken out of fullscreen or tiled mode, so
+  // the maximize/restore button should be disabled, unless the window is not
+  // maximized.
+  const bool maximizable = frame_view_->window()->IsMaximizable();
+  maximize_button_->SetEnabled(!(is_touch && is_maximized) && maximizable);
+
+  const bool closable = frame_view_->window()->IsClosable();
+  close_button_->SetEnabled(closable);
+
+  // If all three of closable, maximizable, and minimizable are disabled,
+  // Windows natively only shows the disabled closable button. Copy that
+  // behavior here.
+  if (!maximizable && !closable && !minimizable) {
+    minimize_button_->SetVisible(false);
+    maximize_button_->SetVisible(false);
+  }
+
   InvalidateLayout();
 }
 }  // namespace electron

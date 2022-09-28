@@ -253,9 +253,11 @@ Returns:
   * `device` [HIDDevice[]](structures/hid-device.md)
   * `frame` [WebFrameMain](web-frame-main.md)
 
-Emitted when a new HID device becomes available. For example, when a new USB device is plugged in.
-
-This event will only be emitted after `navigator.hid.requestDevice` has been called and `select-hid-device` has fired.
+Emitted after `navigator.hid.requestDevice` has been called and
+`select-hid-device` has fired if a new device becomes available before
+the callback from `select-hid-device` is called.  This event is intended for
+use when using a UI to ask users to pick a device so that the UI can be updated
+with the newly added device.
 
 #### Event: 'hid-device-removed'
 
@@ -266,9 +268,24 @@ Returns:
   * `device` [HIDDevice[]](structures/hid-device.md)
   * `frame` [WebFrameMain](web-frame-main.md)
 
-Emitted when a HID device has been removed.  For example, this event will fire when a USB device is unplugged.
+Emitted after `navigator.hid.requestDevice` has been called and
+`select-hid-device` has fired if a device has been removed before the callback
+from `select-hid-device` is called.  This event is intended for use when using
+a UI to ask users to pick a device so that the UI can be updated to remove the
+specified device.
 
-This event will only be emitted after `navigator.hid.requestDevice` has been called and `select-hid-device` has fired.
+#### Event: 'hid-device-revoked'
+
+Returns:
+
+* `event` Event
+* `details` Object
+  * `device` [HIDDevice[]](structures/hid-device.md)
+  * `origin` string (optional) - The origin that the device has been revoked from.
+
+Emitted after `HIDDevice.forget()` has been called.  This event can be used
+to help maintain persistent storage of permissions when
+`setDevicePermissionHandler` is used.
 
 #### Event: 'select-serial-port'
 
@@ -348,7 +365,11 @@ Returns:
 * `port` [SerialPort](structures/serial-port.md)
 * `webContents` [WebContents](web-contents.md)
 
-Emitted after `navigator.serial.requestPort` has been called and `select-serial-port` has fired if a new serial port becomes available.  For example, this event will fire when a new USB device is plugged in.
+Emitted after `navigator.serial.requestPort` has been called and
+`select-serial-port` has fired if a new serial port becomes available before
+the callback from `select-serial-port` is called.  This event is intended for
+use when using a UI to ask users to pick a port so that the UI can be updated
+with the newly added port.
 
 #### Event: 'serial-port-removed'
 
@@ -358,7 +379,11 @@ Returns:
 * `port` [SerialPort](structures/serial-port.md)
 * `webContents` [WebContents](web-contents.md)
 
-Emitted after `navigator.serial.requestPort` has been called and `select-serial-port` has fired if a serial port has been removed.  For example, this event will fire when a USB device is unplugged.
+Emitted after `navigator.serial.requestPort` has been called and
+`select-serial-port` has fired if a serial port has been removed before the
+callback from `select-serial-port` is called.  This event is intended for use
+when using a UI to ask users to pick a port so that the UI can be updated
+to remove the specified port.
 
 ### Instance Methods
 
@@ -567,7 +592,7 @@ the original network configuration.
     * `errorCode` Integer - Error code.
   * `callback` Function
     * `verificationResult` Integer - Value can be one of certificate error codes
-    from [here](https://source.chromium.org/chromium/chromium/src/+/master:net/base/net_error_list.h).
+    from [here](https://source.chromium.org/chromium/chromium/src/+/main:net/base/net_error_list.h).
     Apart from the certificate error codes, the following special codes can be used.
       * `0` - Indicates success and disables Certificate Transparency verification.
       * `-2` - Indicates failure.
@@ -610,7 +635,7 @@ win.webContents.session.setCertificateVerifyProc((request, callback) => {
     * `notifications` - Request notification creation and the ability to display them in the user's system tray.
     * `midi` - Request MIDI access in the `webmidi` API.
     * `midiSysex` - Request the use of system exclusive messages in the `webmidi` API.
-    * `pointerLock` - Request to directly interpret mouse movements as an input method. Click [here](https://developer.mozilla.org/en-US/docs/Web/API/Pointer_Lock_API) to know more.
+    * `pointerLock` - Request to directly interpret mouse movements as an input method. Click [here](https://developer.mozilla.org/en-US/docs/Web/API/Pointer_Lock_API) to know more. These requests always appear to originate from the main frame.
     * `fullscreen` - Request for the app to enter fullscreen mode.
     * `openExternal` - Request to open links in external applications.
     * `unknown` - An unrecognized permission request
@@ -673,6 +698,60 @@ session.fromPartition('some-partition').setPermissionCheckHandler((webContents, 
 })
 ```
 
+#### `ses.setDisplayMediaRequestHandler(handler)`
+
+* `handler` Function | null
+  * `request` Object
+    * `frame` [WebFrameMain](web-frame-main.md) - Frame that is requesting access to media.
+    * `securityOrigin` String - Origin of the page making the request.
+    * `videoRequested` Boolean - true if the web content requested a video stream.
+    * `audioRequested` Boolean - true if the web content requested an audio stream.
+    * `userGesture` Boolean - Whether a user gesture was active when this request was triggered.
+  * `callback` Function
+    * `streams` Object
+      * `video` Object | [WebFrameMain](web-frame-main.md) (optional)
+        * `id` String - The id of the stream being granted. This will usually
+          come from a [DesktopCapturerSource](structures/desktop-capturer-source.md)
+          object.
+        * `name` String - The name of the stream being granted. This will
+          usually come from a [DesktopCapturerSource](structures/desktop-capturer-source.md)
+          object.
+      * `audio` String | [WebFrameMain](web-frame-main.md) (optional) - If
+        a string is specified, can be `loopback` or `loopbackWithMute`.
+        Specifying a loopback device will capture system audio, and is
+        currently only supported on Windows. If a WebFrameMain is specified,
+        will capture audio from that frame.
+
+This handler will be called when web content requests access to display media
+via the `navigator.mediaDevices.getDisplayMedia` API. Use the
+[desktopCapturer](desktop-capturer.md) API to choose which stream(s) to grant
+access to.
+
+```javascript
+const { session, desktopCapturer } = require('electron')
+
+session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+  desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
+    // Grant access to the first screen found.
+    callback({ video: sources[0] })
+  })
+})
+```
+
+Passing a [WebFrameMain](web-frame-main.md) object as a video or audio stream
+will capture the video or audio stream from that frame.
+
+```javascript
+const { session } = require('electron')
+
+session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+  // Allow the tab to capture itself.
+  callback({ video: request.frame })
+})
+```
+
+Passing `null` instead of a function resets the handler to its default state.
+
 #### `ses.setDevicePermissionHandler(handler)`
 
 * `handler` Function\<boolean> | null
@@ -680,7 +759,6 @@ session.fromPartition('some-partition').setPermissionCheckHandler((webContents, 
     * `deviceType` string - The type of device that permission is being requested on, can be `hid` or `serial`.
     * `origin` string - The origin URL of the device permission check.
     * `device` [HIDDevice](structures/hid-device.md) | [SerialPort](structures/serial-port.md)- the device that permission is being requested for.
-    * `frame` [WebFrameMain](web-frame-main.md) - WebFrameMain checking the device permission.
 
 Sets the handler which can be used to respond to device permission checks for the `session`.
 Returning `true` will allow the device to be permitted and `false` will reject it.
@@ -688,8 +766,8 @@ To clear the handler, call `setDevicePermissionHandler(null)`.
 This handler can be used to provide default permissioning to devices without first calling for permission
 to devices (eg via `navigator.hid.requestDevice`).  If this handler is not defined, the default device
 permissions as granted through device selection (eg via `navigator.hid.requestDevice`) will be used.
-Additionally, the default behavior of Electron is to store granted device permision through the lifetime
-of the corresponding WebContents.  If longer term storage is needed, a developer can store granted device
+Additionally, the default behavior of Electron is to store granted device permision in memory.
+If longer term storage is needed, a developer can store granted device
 permissions (eg when handling the `select-hid-device` event) and then read from that storage with `setDevicePermissionHandler`.
 
 ```javascript
@@ -742,6 +820,71 @@ app.whenReady().then(() => {
     })
     callback(selectedPort?.deviceId)
   })
+})
+```
+
+#### `ses.setBluetoothPairingHandler(handler)` _Windows_ _Linux_
+
+* `handler` Function | null
+  * `details` Object
+    * `deviceId` string
+    * `pairingKind` string - The type of pairing prompt being requested.
+      One of the following values:
+      * `confirm`
+        This prompt is requesting confirmation that the Bluetooth device should
+        be paired.
+      * `confirmPin`
+        This prompt is requesting confirmation that the provided PIN matches the
+        pin displayed on the device.
+      * `providePin`
+        This prompt is requesting that a pin be provided for the device.
+    * `frame` [WebFrameMain](web-frame-main.md)
+    * `pin` string (optional) - The pin value to verify if `pairingKind` is `confirmPin`.
+  * `callback` Function
+    * `response` Object
+      * `confirmed` boolean - `false` should be passed in if the dialog is canceled.
+        If the `pairingKind` is `confirm` or `confirmPin`, this value should indicate
+        if the pairing is confirmed.  If the `pairingKind` is `providePin` the value
+        should be `true` when a value is provided.
+      * `pin` string | null (optional) - When the `pairingKind` is `providePin`
+        this value should be the required pin for the Bluetooth device.
+
+Sets a handler to respond to Bluetooth pairing requests. This handler
+allows developers to handle devices that require additional validation
+before pairing.  When a handler is not defined, any pairing on Linux or Windows
+that requires additional validation will be automatically cancelled.
+macOS does not require a handler because macOS handles the pairing
+automatically.  To clear the handler, call `setBluetoothPairingHandler(null)`.
+
+```javascript
+
+const { app, BrowserWindow, ipcMain, session } = require('electron')
+
+let bluetoothPinCallback = null
+
+function createWindow () {
+  const mainWindow = new BrowserWindow({
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js')
+    }
+  })
+}
+
+// Listen for an IPC message from the renderer to get the response for the Bluetooth pairing.
+ipcMain.on('bluetooth-pairing-response', (event, response) => {
+  bluetoothPinCallback(response)
+})
+
+mainWindow.webContents.session.setBluetoothPairingHandler((details, callback) => {
+  bluetoothPinCallback = callback
+  // Send a IPC message to the renderer to prompt the user to confirm the pairing.
+  // Note that this will require logic in the renderer to handle this message and
+  // display a prompt to the user.
+  mainWindow.webContents.send('bluetooth-pairing-request', details)
+})
+
+app.whenReady().then(() => {
+  createWindow()
 })
 ```
 
@@ -868,6 +1011,20 @@ this session just before normal `preload` scripts run.
 Returns `string[]` an array of paths to preload scripts that have been
 registered.
 
+#### `ses.setCodeCachePath(path)`
+
+* `path` String - Absolute path to store the v8 generated JS code cache from the renderer.
+
+Sets the directory to store the generated JS [code cache](https://v8.dev/blog/code-caching-for-devs) for this session. The directory is not required to be created by the user before this call, the runtime will create if it does not exist otherwise will use the existing directory. If directory cannot be created, then code cache will not be used and all operations related to code cache will fail silently inside the runtime. By default, the directory will be `Code Cache` under the
+respective user data folder.
+
+#### `ses.clearCodeCaches(options)`
+
+* `options` Object
+  * `urls` String[] (optional) - An array of url corresponding to the resource whose generated code cache needs to be removed. If the list is empty then all entries in the cache directory will be removed.
+
+Returns `Promise<void>` - resolves when the code cache clear operation is complete.
+
 #### `ses.setSpellCheckerEnabled(enable)`
 
 * `enable` boolean
@@ -894,7 +1051,7 @@ Returns `string[]` - An array of language codes the spellchecker is enabled for.
 will fallback to using `en-US`.  By default on launch if this setting is an empty list Electron will try to populate this
 setting with the current OS locale.  This setting is persisted across restarts.
 
-**Note:** On macOS the OS spellchecker is used and has its own list of languages.  This API is a no-op on macOS.
+**Note:** On macOS the OS spellchecker is used and has its own list of languages. On macOS, this API will return whichever languages have been configured by the OS.
 
 #### `ses.setSpellCheckerDictionaryDownloadURL(url)`
 
@@ -903,8 +1060,10 @@ setting with the current OS locale.  This setting is persisted across restarts.
 By default Electron will download hunspell dictionaries from the Chromium CDN.  If you want to override this
 behavior you can use this API to point the dictionary downloader at your own hosted version of the hunspell
 dictionaries.  We publish a `hunspell_dictionaries.zip` file with each release which contains the files you need
-to host here, the file server must be **case insensitive** you must upload each file twice, once with the case it
-has in the ZIP file and once with the filename as all lower case.
+to host here.
+
+The file server must be **case insensitive**. If you cannot do this, you must upload each file twice: once with
+the case it has in the ZIP file and once with the filename as all lowercase.
 
 If the files present in `hunspell_dictionaries.zip` are available at `https://example.com/dictionaries/language-code.bdic`
 then you should call this api with `ses.setSpellCheckerDictionaryDownloadURL('https://example.com/dictionaries/')`.  Please
@@ -1009,7 +1168,7 @@ is emitted.
 
 #### `ses.getStoragePath()`
 
-A `string | null` indicating the absolute file system path where data for this
+Returns `string | null` - The absolute file system path where data for this
 session is persisted on disk.  For in memory sessions this returns `null`.
 
 ### Instance Properties

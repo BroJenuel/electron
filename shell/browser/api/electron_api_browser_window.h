@@ -14,12 +14,9 @@
 #include "shell/browser/ui/drag_util.h"
 #include "shell/common/gin_helper/error_thrower.h"
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 class BrowserWindow : public BaseWindow,
-                      public content::RenderWidgetHost::InputEventObserver,
                       public content::WebContentsObserver,
                       public ExtendedWebContentsObserver {
  public:
@@ -45,14 +42,7 @@ class BrowserWindow : public BaseWindow,
   BrowserWindow(gin::Arguments* args, const gin_helper::Dictionary& options);
   ~BrowserWindow() override;
 
-  // content::RenderWidgetHost::InputEventObserver:
-  void OnInputEvent(const blink::WebInputEvent& event) override;
-
   // content::WebContentsObserver:
-  void RenderViewHostChanged(content::RenderViewHost* old_host,
-                             content::RenderViewHost* new_host) override;
-  void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
-  void DidFirstVisuallyNonEmptyPaint() override;
   void BeforeUnloadDialogCancelled() override;
   void OnRendererUnresponsive(content::RenderProcessHost*) override;
   void OnRendererResponsive(
@@ -84,13 +74,13 @@ class BrowserWindow : public BaseWindow,
   void Focus() override;
   void Blur() override;
   void SetBackgroundColor(const std::string& color_name) override;
-  void SetBrowserView(v8::Local<v8::Value> value) override;
-  void AddBrowserView(v8::Local<v8::Value> value) override;
-  void RemoveBrowserView(v8::Local<v8::Value> value) override;
-  void SetTopBrowserView(v8::Local<v8::Value> value,
+  void SetBrowserView(
+      absl::optional<gin::Handle<BrowserView>> browser_view) override;
+  void AddBrowserView(gin::Handle<BrowserView> browser_view) override;
+  void RemoveBrowserView(gin::Handle<BrowserView> browser_view) override;
+  void SetTopBrowserView(gin::Handle<BrowserView> browser_view,
                          gin_helper::Arguments* args) override;
   void ResetBrowserViews() override;
-  void SetVibrancy(v8::Isolate* isolate, v8::Local<v8::Value> value) override;
   void OnWindowShow() override;
   void OnWindowHide() override;
 
@@ -99,9 +89,13 @@ class BrowserWindow : public BaseWindow,
   void BlurWebView();
   bool IsWebViewFocused();
   v8::Local<v8::Value> GetWebContents(v8::Isolate* isolate);
+#if BUILDFLAG(IS_WIN)
+  void SetTitleBarOverlay(const gin_helper::Dictionary& options,
+                          gin_helper::Arguments* args);
+#endif
 
  private:
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   void OverrideNSWindowContentView(InspectableWebContentsView* webView);
 #endif
 
@@ -129,8 +123,6 @@ class BrowserWindow : public BaseWindow,
   base::WeakPtrFactory<BrowserWindow> weak_factory_{this};
 };
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 #endif  // ELECTRON_SHELL_BROWSER_API_ELECTRON_API_BROWSER_WINDOW_H_

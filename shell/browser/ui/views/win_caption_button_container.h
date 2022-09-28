@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Modified from
+// chrome/browser/ui/views/frame/glass_browser_caption_button_container.h
+
 #ifndef ELECTRON_SHELL_BROWSER_UI_VIEWS_WIN_CAPTION_BUTTON_CONTAINER_H_
 #define ELECTRON_SHELL_BROWSER_UI_VIEWS_WIN_CAPTION_BUTTON_CONTAINER_H_
 
@@ -35,6 +38,17 @@ class WinCaptionButtonContainer : public views::View,
   // See also ClientView::NonClientHitTest.
   int NonClientHitTest(const gfx::Point& point) const;
 
+  gfx::Size GetButtonSize() const;
+  void SetButtonSize(gfx::Size size);
+
+  // Sets caption button visibility and enabled state based on window state.
+  // Only one of maximize or restore button should ever be visible at the same
+  // time, and both are disabled in tablet UI mode.
+  void UpdateButtons();
+
+  // Reset window button states to STATE_NORMAL.
+  void ResetWindowControls();
+
  private:
   // views::View:
   void AddedToWidget() override;
@@ -43,13 +57,6 @@ class WinCaptionButtonContainer : public views::View,
   // views::WidgetObserver:
   void OnWidgetBoundsChanged(views::Widget* widget,
                              const gfx::Rect& new_bounds) override;
-
-  void ResetWindowControls();
-
-  // Sets caption button visibility and enabled state based on window state.
-  // Only one of maximize or restore button should ever be visible at the same
-  // time, and both are disabled in tablet UI mode.
-  void UpdateButtons();
 
   WinFrameView* const frame_view_;
   WinCaptionButton* const minimize_button_;

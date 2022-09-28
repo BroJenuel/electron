@@ -42,7 +42,8 @@ void AutofillDriverFactory::BindAutofillDriver(
 }
 
 AutofillDriverFactory::AutofillDriverFactory(content::WebContents* web_contents)
-    : content::WebContentsObserver(web_contents) {}
+    : content::WebContentsObserver(web_contents),
+      content::WebContentsUserData<AutofillDriverFactory>(*web_contents) {}
 
 void AutofillDriverFactory::RenderFrameDeleted(
     content::RenderFrameHost* render_frame_host) {
@@ -79,7 +80,7 @@ AutofillDriver* AutofillDriverFactory::DriverForFrame(
     // 3. `SomeOtherWebContentsObserver::RenderFrameDeleted(render_frame_host)`
     //    calls `DriverForFrame(render_frame_host)`.
     // 5. `render_frame_host->~RenderFrameHostImpl()` finishes.
-    if (render_frame_host->IsRenderFrameCreated()) {
+    if (render_frame_host->IsRenderFrameLive()) {
       driver = std::make_unique<AutofillDriver>(render_frame_host);
       DCHECK_EQ(driver_map_.find(render_frame_host)->second.get(),
                 driver.get());

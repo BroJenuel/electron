@@ -15,7 +15,7 @@ OffScreenWebContentsView::OffScreenWebContentsView(
     bool transparent,
     const OnPaintCallback& callback)
     : transparent_(transparent), callback_(callback) {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   PlatformCreate();
 #endif
 }
@@ -24,7 +24,7 @@ OffScreenWebContentsView::~OffScreenWebContentsView() {
   if (native_window_)
     native_window_->RemoveObserver(this);
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   PlatformDestroy();
 #endif
 }
@@ -66,7 +66,7 @@ gfx::Size OffScreenWebContentsView::GetSize() {
   return native_window_ ? native_window_->GetSize() : gfx::Size();
 }
 
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
 gfx::NativeView OffScreenWebContentsView::GetNativeView() const {
   if (!native_window_)
     return gfx::NativeView();
@@ -154,17 +154,18 @@ void OffScreenWebContentsView::SetOverscrollControllerEnabled(bool enabled) {}
 
 void OffScreenWebContentsView::OnCapturerCountChanged() {}
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 bool OffScreenWebContentsView::CloseTabAfterEventTrackingIfNeeded() {
   return false;
 }
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
 
 void OffScreenWebContentsView::StartDragging(
     const content::DropData& drop_data,
     blink::DragOperationsMask allowed_ops,
     const gfx::ImageSkia& image,
-    const gfx::Vector2d& image_offset,
+    const gfx::Vector2d& cursor_offset,
+    const gfx::Rect& drag_obj_rect,
     const blink::mojom::DragEventSourceInfo& event_info,
     content::RenderWidgetHostImpl* source_rwh) {
   if (web_contents_)
@@ -216,5 +217,7 @@ OffScreenRenderWidgetHostView* OffScreenWebContentsView::GetView() const {
   }
   return nullptr;
 }
+
+void OffScreenWebContentsView::FullscreenStateChanged(bool is_fullscreen) {}
 
 }  // namespace electron

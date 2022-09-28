@@ -15,10 +15,10 @@ the redraw locking mechanism, which fixes these issues. The electron issue
 can be found at https://github.com/electron/electron/issues/1821
 
 diff --git a/ui/views/win/hwnd_message_handler.cc b/ui/views/win/hwnd_message_handler.cc
-index 2cc667cbb6291cb8f57a23d7446ddf5f3f699bb6..38c8d1bf63b3ec2eba7ae8ea8a975a990369e393 100644
+index ee704693b5bd303e7093b943a26ada8ef4acdbf9..eb6dcd91c18902c6309553e0073e49cf517dcc7a 100644
 --- a/ui/views/win/hwnd_message_handler.cc
 +++ b/ui/views/win/hwnd_message_handler.cc
-@@ -307,6 +307,10 @@ constexpr int kSynthesizedMouseMessagesTimeDifference = 500;
+@@ -310,6 +310,10 @@ constexpr int kSynthesizedMouseMessagesTimeDifference = 500;
  
  }  // namespace
  
@@ -29,15 +29,17 @@ index 2cc667cbb6291cb8f57a23d7446ddf5f3f699bb6..38c8d1bf63b3ec2eba7ae8ea8a975a99
  // A scoping class that prevents a window from being able to redraw in response
  // to invalidations that may occur within it for the lifetime of the object.
  //
-@@ -358,6 +362,7 @@ class HWNDMessageHandler::ScopedRedrawLock {
+@@ -360,7 +364,8 @@ class HWNDMessageHandler::ScopedRedrawLock {
+         hwnd_(owner_->hwnd()),
          cancel_unlock_(false),
          should_lock_(owner_->IsVisible() && !owner->HasChildRenderingWindow() &&
-                      ::IsWindow(hwnd_) &&
-+                     !owner_->HasNativeFrame() &&
+-                     ::IsWindow(hwnd_) && !owner_->IsHeadless() &&
++                     ::IsWindow(hwnd_) && !owner_->HasNativeFrame() &&
++                     !owner_->IsHeadless() &&
                       (!(GetWindowLong(hwnd_, GWL_STYLE) & WS_CAPTION) ||
                        !ui::win::IsAeroGlassEnabled())) {
      if (should_lock_)
-@@ -977,6 +982,10 @@ HWNDMessageHandler::RegisterUnadjustedMouseEvent() {
+@@ -1056,6 +1061,10 @@ HWNDMessageHandler::RegisterUnadjustedMouseEvent() {
    return scoped_enable;
  }
  
@@ -49,10 +51,10 @@ index 2cc667cbb6291cb8f57a23d7446ddf5f3f699bb6..38c8d1bf63b3ec2eba7ae8ea8a975a99
  // HWNDMessageHandler, gfx::WindowImpl overrides:
  
 diff --git a/ui/views/win/hwnd_message_handler.h b/ui/views/win/hwnd_message_handler.h
-index 1dce6029dbf81d173be148da4e3f5cb63d0fd4b8..15f1e226b5e160aba38deb4c75fd8b9538a16dab 100644
+index 3344a25c7e14998d27a5e50e479b43e924463ba1..6397495f3a4144ee39abde7a8473c31e0bf1b297 100644
 --- a/ui/views/win/hwnd_message_handler.h
 +++ b/ui/views/win/hwnd_message_handler.h
-@@ -205,6 +205,8 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
+@@ -210,6 +210,8 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
    using TouchIDs = std::set<DWORD>;
    enum class DwmFrameState { kOff, kOn };
  

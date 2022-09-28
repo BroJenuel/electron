@@ -17,6 +17,7 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe_producer.h"
 #include "net/base/load_flags.h"
+#include "net/http/http_util.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "services/network/public/mojom/chunked_data_pipe_getter.mojom.h"
@@ -40,7 +41,7 @@ struct Converter<network::mojom::HttpRawHeaderPairPtr> {
       v8::Isolate* isolate,
       const network::mojom::HttpRawHeaderPairPtr& pair) {
     gin_helper::Dictionary dict = gin::Dictionary::CreateEmpty(isolate);
-    dict.Set("key", base::ToLowerASCII(pair->key));
+    dict.Set("key", pair->key);
     dict.Set("value", pair->value);
     return dict.GetHandle();
   }
@@ -65,13 +66,11 @@ struct Converter<network::mojom::CredentialsMode> {
       return false;
     return true;
   }
-};  // namespace gin
+};
 
 }  // namespace gin
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 namespace {
 
@@ -361,10 +360,12 @@ void SimpleURLLoaderWrapper::OnSSLCertificateError(
   std::move(response).Run(net_error);
 }
 
-void SimpleURLLoaderWrapper::OnClearSiteData(const GURL& url,
-                                             const std::string& header_value,
-                                             int32_t load_flags,
-                                             OnClearSiteDataCallback callback) {
+void SimpleURLLoaderWrapper::OnClearSiteData(
+    const GURL& url,
+    const std::string& header_value,
+    int32_t load_flags,
+    const absl::optional<net::CookiePartitionKey>& cookie_partition_key,
+    OnClearSiteDataCallback callback) {
   std::move(callback).Run();
 }
 void SimpleURLLoaderWrapper::OnLoadingStateUpdate(
@@ -488,7 +489,7 @@ gin::Handle<SimpleURLLoaderWrapper> SimpleURLLoaderWrapper::Create(
   int options = 0;
   if (!credentials_specified && !use_session_cookies) {
     // This is the default case, as well as the case when credentials is not
-    // specified and useSessionCoookies is false. credentials_mode will be
+    // specified and useSessionCookies is false. credentials_mode will be
     // kInclude, but cookies will be blocked.
     request->credentials_mode = network::mojom::CredentialsMode::kInclude;
     options |= network::mojom::kURLLoadOptionBlockAllCookies;
@@ -611,6 +612,4 @@ const char* SimpleURLLoaderWrapper::GetTypeName() {
   return "SimpleURLLoaderWrapper";
 }
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api

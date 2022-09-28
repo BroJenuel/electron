@@ -21,7 +21,6 @@
 #include "content/common/frame.mojom.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
-#include "content/public/browser/permission_type.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -47,7 +46,6 @@
 #include "ui/gfx/image/image.h"
 
 #if BUILDFLAG(ENABLE_PRINTING)
-#include "shell/browser/printing/print_preview_message_handler.h"
 #include "shell/browser/printing/print_view_manager_electron.h"
 #endif
 
@@ -61,7 +59,8 @@ class ScriptExecutor;
 
 namespace blink {
 struct DeviceEmulationParams;
-}
+// enum class PermissionType;
+}  // namespace blink
 
 namespace gin_helper {
 class Dictionary;
@@ -95,11 +94,6 @@ class OffScreenWebContentsView;
 
 namespace api {
 
-using DevicePermissionMap = std::map<
-    int,
-    std::map<content::PermissionType,
-             std::map<url::Origin, std::vector<std::unique_ptr<base::Value>>>>>;
-
 // Wrapper around the content::WebContents.
 class WebContents : public ExclusiveAccessContext,
                     public gin::Wrappable<WebContents>,
@@ -109,6 +103,7 @@ class WebContents : public ExclusiveAccessContext,
                     public gin_helper::CleanedUpAtExit,
                     public content::WebContentsObserver,
                     public content::WebContentsDelegate,
+                    public content::RenderWidgetHost::InputEventObserver,
                     public InspectableWebContentsDelegate,
                     public InspectableWebContentsViewDelegate {
  public:
@@ -158,6 +153,7 @@ class WebContents : public ExclusiveAccessContext,
   const char* GetTypeName() override;
 
   void Destroy();
+  void Close(absl::optional<gin_helper::Dictionary> options);
   base::WeakPtr<WebContents> GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
 
   bool GetBackgroundThrottling() const;
@@ -222,15 +218,17 @@ class WebContents : public ExclusiveAccessContext,
   void HandleNewRenderFrame(content::RenderFrameHost* render_frame_host);
 
 #if BUILDFLAG(ENABLE_PRINTING)
-  void OnGetDefaultPrinter(base::Value print_settings,
-                           printing::CompletionCallback print_callback,
-                           std::u16string device_name,
-                           bool silent,
-                           // <error, default_printer_name>
-                           std::pair<std::string, std::u16string> info);
+  void OnGetDeviceNameToUse(base::Value::Dict print_settings,
+                            printing::CompletionCallback print_callback,
+                            bool silent,
+                            // <error, device_name>
+                            std::pair<std::string, std::u16string> info);
   void Print(gin::Arguments* args);
   // Print current page as PDF.
-  v8::Local<v8::Promise> PrintToPDF(base::DictionaryValue settings);
+  v8::Local<v8::Promise> PrintToPDF(const base::Value& settings);
+  void OnPDFCreated(gin_helper::Promise<v8::Local<v8::Value>> promise,
+                    PrintViewManagerElectron::PrintResult print_result,
+                    scoped_refptr<base::RefCountedMemory> data);
 #endif
 
   void SetNextChildWebPreferences(const gin_helper::Dictionary);
@@ -317,7 +315,6 @@ class WebContents : public ExclusiveAccessContext,
   std::vector<base::FilePath> GetPreloadPaths() const;
 
   // Returns the web preferences of current WebContents.
-  v8::Local<v8::Value> GetWebPreferences(v8::Isolate* isolate) const;
   v8::Local<v8::Value> GetLastWebPreferences(v8::Isolate* isolate) const;
 
   // Returns the owner window.
@@ -337,6 +334,7 @@ class WebContents : public ExclusiveAccessContext,
   v8::Local<v8::Value> DevToolsWebContents(v8::Isolate* isolate);
   v8::Local<v8::Value> Debugger(v8::Isolate* isolate);
   content::RenderFrameHost* MainFrame();
+  content::RenderFrameHost* Opener();
 
   WebContentsZoomController* GetZoomController() { return zoom_controller_; }
 
@@ -356,7 +354,7 @@ class WebContents : public ExclusiveAccessContext,
   template <typename... Args>
   bool EmitWithSender(base::StringPiece name,
                       content::RenderFrameHost* sender,
-                      electron::mojom::ElectronBrowser::InvokeCallback callback,
+                      electron::mojom::ElectronApiIPC::InvokeCallback callback,
                       Args&&... args) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
@@ -400,7 +398,7 @@ class WebContents : public ExclusiveAccessContext,
     fullscreen_frame_ = rfh;
   }
 
-  // mojom::ElectronBrowser
+  // mojom::ElectronApiIPC
   void Message(bool internal,
                const std::string& channel,
                blink::CloneableMessage arguments,
@@ -408,9 +406,8 @@ class WebContents : public ExclusiveAccessContext,
   void Invoke(bool internal,
               const std::string& channel,
               blink::CloneableMessage arguments,
-              electron::mojom::ElectronBrowser::InvokeCallback callback,
+              electron::mojom::ElectronApiIPC::InvokeCallback callback,
               content::RenderFrameHost* render_frame_host);
-  void OnFirstNonEmptyLayout(content::RenderFrameHost* render_frame_host);
   void ReceivePostMessage(const std::string& channel,
                           blink::TransferableMessage message,
                           content::RenderFrameHost* render_frame_host);
@@ -418,7 +415,7 @@ class WebContents : public ExclusiveAccessContext,
       bool internal,
       const std::string& channel,
       blink::CloneableMessage arguments,
-      electron::mojom::ElectronBrowser::MessageSyncCallback callback,
+      electron::mojom::ElectronApiIPC::MessageSyncCallback callback,
       content::RenderFrameHost* render_frame_host);
   void MessageTo(int32_t web_contents_id,
                  const std::string& channel,
@@ -426,26 +423,19 @@ class WebContents : public ExclusiveAccessContext,
   void MessageHost(const std::string& channel,
                    blink::CloneableMessage arguments,
                    content::RenderFrameHost* render_frame_host);
+
+  // mojom::ElectronWebContentsUtility
+  void OnFirstNonEmptyLayout(content::RenderFrameHost* render_frame_host);
   void UpdateDraggableRegions(std::vector<mojom::DraggableRegionPtr> regions);
   void SetTemporaryZoomLevel(double level);
   void DoGetZoomLevel(
-      electron::mojom::ElectronBrowser::DoGetZoomLevelCallback callback);
+      electron::mojom::ElectronWebContentsUtility::DoGetZoomLevelCallback
+          callback);
+
   void SetImageAnimationPolicy(const std::string& new_policy);
 
-  // Grants |origin| access to |device|.
-  // To be used in place of ObjectPermissionContextBase::GrantObjectPermission.
-  void GrantDevicePermission(const url::Origin& origin,
-                             const base::Value* device,
-                             content::PermissionType permissionType,
-                             content::RenderFrameHost* render_frame_host);
-
-  // Returns the list of devices that |origin| has been granted permission to
-  // access. To be used in place of
-  // ObjectPermissionContextBase::GetGrantedObjects.
-  std::vector<base::Value> GetGrantedDevices(
-      const url::Origin& origin,
-      content::PermissionType permissionType,
-      content::RenderFrameHost* render_frame_host);
+  // content::RenderWidgetHost::InputEventObserver:
+  void OnInputEvent(const blink::WebInputEvent& event) override;
 
   // disable copy
   WebContents(const WebContents&) = delete;
@@ -501,7 +491,7 @@ class WebContents : public ExclusiveAccessContext,
       const GURL& opener_url,
       const std::string& frame_name,
       const GURL& target_url,
-      const content::StoragePartitionId& partition_id,
+      const content::StoragePartitionConfig& partition_config,
       content::SessionStorageNamespace* session_storage_namespace) override;
   void WebContentsCreatedWithFullParams(
       content::WebContents* source_contents,
@@ -513,7 +503,7 @@ class WebContents : public ExclusiveAccessContext,
                       std::unique_ptr<content::WebContents> new_contents,
                       const GURL& target_url,
                       WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_rect,
+                      const blink::mojom::WindowFeatures& window_features,
                       bool user_gesture,
                       bool* was_blocked) override;
   content::WebContents* OpenURLFromTab(
@@ -550,13 +540,20 @@ class WebContents : public ExclusiveAccessContext,
       content::RenderWidgetHost* render_widget_host) override;
   bool HandleContextMenu(content::RenderFrameHost& render_frame_host,
                          const content::ContextMenuParams& params) override;
-  bool OnGoToEntryOffset(int offset) override;
   void FindReply(content::WebContents* web_contents,
                  int request_id,
                  int number_of_matches,
                  const gfx::Rect& selection_rect,
                  int active_match_ordinal,
                  bool final_update) override;
+  void RequestExclusivePointerAccess(content::WebContents* web_contents,
+                                     bool user_gesture,
+                                     bool last_unlocked_by_target,
+                                     bool allowed);
+  void RequestToLockMouse(content::WebContents* web_contents,
+                          bool user_gesture,
+                          bool last_unlocked_by_target) override;
+  void LostMouseLock() override;
   void RequestKeyboardLock(content::WebContents* web_contents,
                            bool esc_key_locked) override;
   void CancelKeyboardLockRequest(content::WebContents* web_contents) override;
@@ -567,9 +564,6 @@ class WebContents : public ExclusiveAccessContext,
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
       content::MediaResponseCallback callback) override;
-  void RequestToLockMouse(content::WebContents* web_contents,
-                          bool user_gesture,
-                          bool last_unlocked_by_target) override;
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
       content::WebContents* source) override;
   void OnAudioStateChanged(bool audible) override;
@@ -579,6 +573,7 @@ class WebContents : public ExclusiveAccessContext,
   // content::WebContentsObserver:
   void BeforeUnloadFired(bool proceed,
                          const base::TimeTicks& proceed_time) override;
+  void OnBackgroundColorChanged() override;
   void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
   void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
   void RenderFrameHostChanged(content::RenderFrameHost* old_host,
@@ -621,6 +616,12 @@ class WebContents : public ExclusiveAccessContext,
   void DidChangeThemeColor() override;
   void OnCursorChanged(const content::WebCursor& cursor) override;
   void DidAcquireFullscreen(content::RenderFrameHost* rfh) override;
+  void OnWebContentsFocused(
+      content::RenderWidgetHost* render_widget_host) override;
+  void OnWebContentsLostFocus(
+      content::RenderWidgetHost* render_widget_host) override;
+  void RenderViewHostChanged(content::RenderViewHost* old_host,
+                             content::RenderViewHost* new_host) override;
 
   // InspectableWebContentsDelegate:
   void DevToolsReloadPage() override;
@@ -671,6 +672,7 @@ class WebContents : public ExclusiveAccessContext,
       const GURL& url,
       ExclusiveAccessBubbleType bubble_type,
       ExclusiveAccessBubbleHideCallback bubble_first_hide_callback,
+      bool notify_download,
       bool force_update) override;
   void OnExclusiveAccessUserInput() override;
   content::WebContents* GetActiveWebContents() override;
@@ -680,9 +682,7 @@ class WebContents : public ExclusiveAccessContext,
   bool IsFullscreenForTabOrPending(const content::WebContents* source) override;
   bool TakeFocus(content::WebContents* source, bool reverse) override;
   content::PictureInPictureResult EnterPictureInPicture(
-      content::WebContents* web_contents,
-      const viz::SurfaceId&,
-      const gfx::Size& natural_size) override;
+      content::WebContents* web_contents) override;
   void ExitPictureInPicture() override;
 
   // InspectableWebContentsDelegate:
@@ -706,10 +706,10 @@ class WebContents : public ExclusiveAccessContext,
   void DevToolsSetEyeDropperActive(bool active) override;
 
   // InspectableWebContentsViewDelegate:
-#if defined(TOOLKIT_VIEWS) && !defined(OS_MAC)
+#if defined(TOOLKIT_VIEWS) && !BUILDFLAG(IS_MAC)
   ui::ImageModel GetDevToolsWindowIcon() override;
 #endif
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
   void GetDevToolsWindowWMClass(std::string* name,
                                 std::string* class_name) override;
 #endif
@@ -817,9 +817,6 @@ class WebContents : public ExclusiveAccessContext,
 
   // Stores the frame thats currently in fullscreen, nullptr if there is none.
   content::RenderFrameHost* fullscreen_frame_ = nullptr;
-
-  // In-memory cache that holds objects that have been granted permissions.
-  DevicePermissionMap granted_devices_;
 
   base::WeakPtrFactory<WebContents> weak_factory_{this};
 };

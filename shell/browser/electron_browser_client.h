@@ -20,7 +20,6 @@
 #include "net/ssl/client_cert_identity.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "shell/browser/bluetooth/electron_bluetooth_delegate.h"
-#include "shell/browser/font/electron_font_access_delegate.h"
 #include "shell/browser/hid/electron_hid_delegate.h"
 #include "shell/browser/serial/electron_serial_delegate.h"
 #include "third_party/blink/public/mojom/badging/badging.mojom-forward.h"
@@ -39,6 +38,7 @@ namespace electron {
 class ElectronBrowserMainParts;
 class NotificationPresenter;
 class PlatformNotificationService;
+class ElectronWebAuthenticationDelegate;
 
 class ElectronBrowserClient : public content::ContentBrowserClient,
                               public content::RenderProcessHostObserver {
@@ -83,9 +83,10 @@ class ElectronBrowserClient : public content::ContentBrowserClient,
       content::RenderFrameHost* render_frame_host,
       mojo::BinderMapWithContext<content::RenderFrameHost*>* map) override;
   void RegisterBrowserInterfaceBindersForServiceWorker(
+      content::BrowserContext* browser_context,
       mojo::BinderMapWithContext<const content::ServiceWorkerVersionBaseInfo&>*
           map) override;
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
@@ -94,14 +95,15 @@ class ElectronBrowserClient : public content::ContentBrowserClient,
 
   std::string GetUserAgent() override;
   void SetUserAgent(const std::string& user_agent);
+  blink::UserAgentMetadata GetUserAgentMetadata() override;
 
   content::SerialDelegate* GetSerialDelegate() override;
-
-  content::FontAccessDelegate* GetFontAccessDelegate() override;
 
   content::BluetoothDelegate* GetBluetoothDelegate() override;
 
   content::HidDelegate* GetHidDelegate() override;
+
+  content::WebAuthenticationDelegate* GetWebAuthenticationDelegate() override;
 
   device::GeolocationManager* GetGeolocationManager() override;
 
@@ -156,8 +158,12 @@ class ElectronBrowserClient : public content::ContentBrowserClient,
                        bool opener_suppressed,
                        bool* no_javascript_access) override;
 #if BUILDFLAG(ENABLE_PICTURE_IN_PICTURE)
-  std::unique_ptr<content::OverlayWindow> CreateWindowForPictureInPicture(
-      content::PictureInPictureWindowController* controller) override;
+  std::unique_ptr<content::VideoOverlayWindow>
+  CreateWindowForVideoPictureInPicture(
+      content::VideoPictureInPictureWindowController* controller) override;
+  std::unique_ptr<content::DocumentOverlayWindow>
+  CreateWindowForDocumentPictureInPicture(
+      content::DocumentPictureInPictureWindowController* controller) override;
 #endif
   void GetAdditionalAllowedSchemesForFileSystem(
       std::vector<std::string>* additional_schemes) override;
@@ -180,7 +186,7 @@ class ElectronBrowserClient : public content::ContentBrowserClient,
   std::unique_ptr<content::DevToolsManagerDelegate>
   CreateDevToolsManagerDelegate() override;
   std::unique_ptr<content::BrowserMainParts> CreateBrowserMainParts(
-      content::MainFunctionParams params) override;
+      bool /* is_integration_test */) override;
   base::FilePath GetDefaultDownloadDirectory() override;
   scoped_refptr<network::SharedURLLoaderFactory>
   GetSystemSharedURLLoaderFactory() override;
@@ -198,6 +204,10 @@ class ElectronBrowserClient : public content::ContentBrowserClient,
   void RegisterNonNetworkSubresourceURLLoaderFactories(
       int render_process_id,
       int render_frame_id,
+      const absl::optional<url::Origin>& request_initiator_origin,
+      NonNetworkURLLoaderFactoryMap* factories) override;
+  void RegisterNonNetworkServiceWorkerUpdateURLLoaderFactories(
+      content::BrowserContext* browser_context,
       NonNetworkURLLoaderFactoryMap* factories) override;
   void CreateWebSocket(
       content::RenderFrameHost* frame,
@@ -222,6 +232,12 @@ class ElectronBrowserClient : public content::ContentBrowserClient,
       bool* bypass_redirect_checks,
       bool* disable_secure_dns,
       network::mojom::URLLoaderFactoryOverridePtr* factory_override) override;
+  std::vector<std::unique_ptr<content::URLLoaderRequestInterceptor>>
+  WillCreateURLLoaderRequestInterceptors(
+      content::NavigationUIData* navigation_ui_data,
+      int frame_tree_node_id,
+      const scoped_refptr<network::SharedURLLoaderFactory>&
+          network_loader_factory) override;
   bool ShouldTreatURLSchemeAsFirstPartyWhenTopLevel(
       base::StringPiece scheme,
       bool is_embedded_origin_secure) override;
@@ -230,27 +246,27 @@ class ElectronBrowserClient : public content::ContentBrowserClient,
       const url::Origin& origin,
       bool is_for_isolated_world,
       network::mojom::URLLoaderFactoryParams* factory_params) override;
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   bool PreSpawnChild(sandbox::TargetPolicy* policy,
                      sandbox::mojom::Sandbox sandbox_type,
                      ChildSpawnFlags flags) override;
 #endif
-  bool BindAssociatedReceiverFromFrame(
-      content::RenderFrameHost* render_frame_host,
-      const std::string& interface_name,
-      mojo::ScopedInterfaceEndpointHandle* handle) override;
+  void RegisterAssociatedInterfaceBindersForRenderFrameHost(
+      content::RenderFrameHost& render_frame_host,
+      blink::AssociatedInterfaceRegistry& associated_registry) override;
 
   bool HandleExternalProtocol(
       const GURL& url,
       content::WebContents::Getter web_contents_getter,
-      int child_id,
       int frame_tree_node_id,
       content::NavigationUIData* navigation_data,
-      bool is_main_frame,
+      bool is_primary_main_frame,
+      bool is_in_fenced_frame_tree,
       network::mojom::WebSandboxFlags sandbox_flags,
       ui::PageTransition page_transition,
       bool has_user_gesture,
       const absl::optional<url::Origin>& initiating_origin,
+      content::RenderFrameHost* initiator_document,
       mojo::PendingRemote<network::mojom::URLLoaderFactory>* out_factory)
       override;
   std::unique_ptr<content::LoginDelegate> CreateLoginDelegate(
@@ -316,10 +332,11 @@ class ElectronBrowserClient : public content::ContentBrowserClient,
 
   std::unique_ptr<ElectronSerialDelegate> serial_delegate_;
   std::unique_ptr<ElectronBluetoothDelegate> bluetooth_delegate_;
-  std::unique_ptr<ElectronFontAccessDelegate> font_access_delegate_;
   std::unique_ptr<ElectronHidDelegate> hid_delegate_;
+  std::unique_ptr<ElectronWebAuthenticationDelegate>
+      web_authentication_delegate_;
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   ElectronBrowserMainParts* browser_main_parts_ = nullptr;
 #endif
 };

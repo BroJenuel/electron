@@ -5,8 +5,8 @@
 Process: [Renderer](../glossary.md#renderer-process)
 
 `webFrame` export of the Electron module is an instance of the `WebFrame`
-class representing the top frame of the current `BrowserWindow`. Sub-frames can
-be retrieved by certain properties and methods (e.g. `webFrame.firstChild`).
+class representing the current frame. Sub-frames can be retrieved by
+certain properties and methods (e.g. `webFrame.firstChild`).
 
 An example of zooming current page to 200%.
 
@@ -110,9 +110,11 @@ webFrame.setSpellCheckProvider('en-US', {
 })
 ```
 
-### `webFrame.insertCSS(css)`
+### `webFrame.insertCSS(css[, options])`
 
-* `css` string - CSS source code.
+* `css` string
+* `options` Object (optional)
+  * `cssOrigin` string (optional) - Can be either 'user' or 'author'. Sets the [cascade origin](https://www.w3.org/TR/css3-cascade/#cascade-origin) of the inserted stylesheet. Default is 'author'.
 
 Returns `string` - A key for the inserted CSS that can later be used to remove
 the CSS via `webFrame.removeInsertedCSS(key)`.

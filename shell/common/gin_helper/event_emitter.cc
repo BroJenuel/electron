@@ -10,9 +10,7 @@
 #include "shell/common/gin_helper/dictionary.h"
 #include "shell/common/gin_helper/object_template_builder.h"
 
-namespace gin_helper {
-
-namespace internal {
+namespace gin_helper::internal {
 
 namespace {
 
@@ -54,7 +52,7 @@ v8::Local<v8::Object> CreateNativeEvent(
     v8::Isolate* isolate,
     v8::Local<v8::Object> sender,
     content::RenderFrameHost* frame,
-    electron::mojom::ElectronBrowser::MessageSyncCallback callback) {
+    electron::mojom::ElectronApiIPC::MessageSyncCallback callback) {
   v8::Local<v8::Object> event;
   if (frame && callback) {
     gin::Handle<Event> native_event = Event::Create(isolate);
@@ -75,6 +73,4 @@ v8::Local<v8::Object> CreateNativeEvent(
   return event;
 }
 
-}  // namespace internal
-
-}  // namespace gin_helper
+}  // namespace gin_helper::internal

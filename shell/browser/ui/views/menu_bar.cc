@@ -8,15 +8,16 @@
 
 #include "shell/browser/native_window.h"
 #include "shell/browser/ui/views/submenu_button.h"
+#include "ui/color/color_provider.h"
 #include "ui/native_theme/common_theme.h"
 #include "ui/views/background.h"
 #include "ui/views/layout/box_layout.h"
 
-#if defined(OS_LINUX)
-#include "ui/gtk/gtk_util.h"
+#if BUILDFLAG(IS_LINUX)
+#include "ui/gtk/gtk_util.h"  // nogncheck
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "ui/gfx/color_utils.h"
 #endif
 
@@ -34,10 +35,12 @@ const char MenuBar::kViewClassName[] = "ElectronMenuBar";
 MenuBar::MenuBar(NativeWindow* window, RootView* root_view)
     : background_color_(kDefaultColor), window_(window), root_view_(root_view) {
   const ui::NativeTheme* theme = root_view_->GetNativeTheme();
-  if (theme) {
-    RefreshColorCache(theme);
-  }
+  RefreshColorCache(theme);
   UpdateViewColors();
+#if BUILDFLAG(IS_WIN)
+  SetBackground(views::CreateThemedSolidBackground(ui::kColorMenuBackground));
+  background_color_ = GetBackground()->get_color();
+#endif
   SetFocusBehavior(FocusBehavior::ALWAYS);
   SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kHorizontal));
@@ -78,7 +81,7 @@ void MenuBar::ActivateAccelerator(char16_t key) {
     static_cast<SubmenuButton*>(child)->Activate(nullptr);
 }
 
-int MenuBar::GetItemCount() const {
+size_t MenuBar::GetItemCount() const {
   return menu_model_ ? menu_model_->GetItemCount() : 0;
 }
 
@@ -89,7 +92,7 @@ bool MenuBar::GetMenuButtonFromScreenPoint(const gfx::Point& screenPoint,
     return false;
 
   auto children = GetChildrenInZOrder();
-  for (int i = 0, n = children.size(); i < n; ++i) {
+  for (size_t i = 0, n = children.size(); i < n; ++i) {
     if (children[i]->GetBoundsInScreen().Contains(screenPoint) &&
         (menu_model_->GetTypeAt(i) == ElectronMenuModel::TYPE_SUBMENU)) {
       *menu_model = menu_model_->GetSubmenuModelAt(i);
@@ -156,9 +159,7 @@ bool MenuBar::SetPaneFocusAndFocusDefault() {
 void MenuBar::OnThemeChanged() {
   views::AccessiblePaneView::OnThemeChanged();
   const ui::NativeTheme* theme = root_view_->GetNativeTheme();
-  if (theme) {
-    RefreshColorCache(theme);
-  }
+  RefreshColorCache(theme);
   UpdateViewColors();
 }
 
@@ -173,7 +174,7 @@ const char* MenuBar::GetClassName() const {
   return kViewClassName;
 }
 
-void MenuBar::ButtonPressed(int id, const ui::Event& event) {
+void MenuBar::ButtonPressed(size_t id, const ui::Event& event) {
   // Hide the accelerator when a submenu is activated.
   SetAcceleratorVisibility(pane_has_focus());
 
@@ -192,7 +193,8 @@ void MenuBar::ButtonPressed(int id, const ui::Event& event) {
   SubmenuButton* source = nullptr;
   for (auto* child : children()) {
     auto* button = static_cast<SubmenuButton*>(child);
-    if (button->tag() == id) {
+    int button_id = button->GetID();
+    if (button_id >= 0 && static_cast<size_t>(button_id) == id) {
       source = button;
       break;
     }
@@ -209,39 +211,38 @@ void MenuBar::ButtonPressed(int id, const ui::Event& event) {
 
 void MenuBar::RefreshColorCache(const ui::NativeTheme* theme) {
   if (theme) {
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
     background_color_ = gtk::GetBgColor("GtkMenuBar#menubar");
     enabled_color_ =
         gtk::GetFgColor("GtkMenuBar#menubar GtkMenuItem#menuitem GtkLabel");
     disabled_color_ = gtk::GetFgColor(
         "GtkMenuBar#menubar GtkMenuItem#menuitem:disabled GtkLabel");
-#else
-    background_color_ =
-        ui::GetAuraColor(ui::NativeTheme::kColorId_MenuBackgroundColor, theme);
 #endif
   }
 }
 
 void MenuBar::RebuildChildren() {
   RemoveAllChildViews();
-  for (int i = 0, n = GetItemCount(); i < n; ++i) {
+  for (size_t i = 0, n = GetItemCount(); i < n; ++i) {
     auto* button = new SubmenuButton(
         base::BindRepeating(&MenuBar::ButtonPressed, base::Unretained(this), i),
         menu_model_->GetLabelAt(i), background_color_);
-    button->set_tag(i);
+    button->SetID(i);
     AddChildView(button);
   }
   UpdateViewColors();
 }
 
 void MenuBar::UpdateViewColors() {
+#if BUILDFLAG(IS_LINUX)
   // set menubar background color
   SetBackground(views::CreateSolidBackground(background_color_));
+#endif
 
   // set child colors
   if (menu_model_ == nullptr)
     return;
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
   const auto& textColor =
       window_->IsFocused() ? enabled_color_ : disabled_color_;
   for (auto* child : GetChildrenInZOrder()) {
@@ -252,7 +253,7 @@ void MenuBar::UpdateViewColors() {
     button->SetTextColor(views::Button::STATE_HOVERED, textColor);
     button->SetUnderlineColor(textColor);
   }
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
   for (auto* child : GetChildrenInZOrder()) {
     auto* button = static_cast<SubmenuButton*>(child);
     button->SetUnderlineColor(color_utils::GetSysSkColor(COLOR_MENUTEXT));

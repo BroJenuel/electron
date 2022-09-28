@@ -6,10 +6,10 @@ Subject: mas: avoid usage of CGDisplayUsesForceToGray
 Removes usage of the CGDisplayUsesForceToGray private API.
 
 diff --git a/ui/display/mac/screen_mac.mm b/ui/display/mac/screen_mac.mm
-index 7354a04f927af9a61eff83a8a5a9bc1054da80ec..f38ef7e9e1781f0c880ffcccabb984dcafdaada8 100644
+index fc2ac4583bafd1847fd8dfe3fccbdf4eb40bd929..50fb6b583f84623bd8a146d9476cdf7989627d8a 100644
 --- a/ui/display/mac/screen_mac.mm
 +++ b/ui/display/mac/screen_mac.mm
-@@ -149,7 +149,17 @@ DisplayMac BuildDisplayForScreen(NSScreen* screen) {
+@@ -269,7 +269,17 @@ DisplayMac BuildDisplayForScreen(NSScreen* screen) {
      display.set_color_depth(Display::kDefaultBitsPerPixel);
      display.set_depth_per_component(Display::kDefaultBitsPerComponent);
    }

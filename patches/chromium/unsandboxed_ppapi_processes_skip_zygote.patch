@@ -5,17 +5,25 @@ Subject: unsandboxed_ppapi_processes_skip_zygote.patch
 
 Unsandboxed ppapi processes should skip zygote.
 
-diff --git a/content/browser/ppapi_plugin_process_host.cc b/content/browser/ppapi_plugin_process_host.cc
-index 720921b36b65d0332d0a59df4b26c1f32dd49928..eec1a915daaaa9305a49a7bd117186e59b5ae5f9 100644
---- a/content/browser/ppapi_plugin_process_host.cc
-+++ b/content/browser/ppapi_plugin_process_host.cc
-@@ -115,6 +115,9 @@ class PpapiPluginSandboxedProcessLauncherDelegate
-   ZygoteHandle GetZygote() override {
-     const base::CommandLine& browser_command_line =
-         *base::CommandLine::ForCurrentProcess();
-+    if (browser_command_line.HasSwitch(sandbox::policy::switches::kNoSandbox)) {
-+      return nullptr;
-+    }
-     base::CommandLine::StringType plugin_launcher = browser_command_line
-         .GetSwitchValueNative(switches::kPpapiPluginLauncher);
-     if (!plugin_launcher.empty())
+diff --git a/content/browser/ppapi_plugin_sandboxed_process_launcher_delegate.cc b/content/browser/ppapi_plugin_sandboxed_process_launcher_delegate.cc
+index a685559095fc12da49b5dc6e8b467ae9d98889b5..83f5386244e1e0be4f4c784c46793739b76883dc 100644
+--- a/content/browser/ppapi_plugin_sandboxed_process_launcher_delegate.cc
++++ b/content/browser/ppapi_plugin_sandboxed_process_launcher_delegate.cc
+@@ -8,6 +8,7 @@
+ #include "build/build_config.h"
+ #include "content/public/common/content_switches.h"
+ #include "sandbox/policy/mojom/sandbox.mojom.h"
++#include "sandbox/policy/switches.h"
+ 
+ #if BUILDFLAG(IS_WIN)
+ #include "base/win/windows_version.h"
+@@ -63,6 +64,9 @@ bool PpapiPluginSandboxedProcessLauncherDelegate::PreSpawnTarget(
+ ZygoteHandle PpapiPluginSandboxedProcessLauncherDelegate::GetZygote() {
+   const base::CommandLine& browser_command_line =
+       *base::CommandLine::ForCurrentProcess();
++  if (browser_command_line.HasSwitch(sandbox::policy::switches::kNoSandbox)) {
++    return nullptr;
++  }
+   base::CommandLine::StringType plugin_launcher =
+       browser_command_line.GetSwitchValueNative(switches::kPpapiPluginLauncher);
+   if (!plugin_launcher.empty())

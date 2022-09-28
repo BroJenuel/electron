@@ -11,7 +11,7 @@
 #include "base/values.h"
 #include "ui/base/window_open_disposition.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #endif
 
@@ -81,8 +81,6 @@ class NativeWindowObserver : public base::CheckedObserver {
                                 bool* prevent_default) {}
   virtual void OnWindowMove() {}
   virtual void OnWindowMoved() {}
-  virtual void OnWindowScrollTouchBegin() {}
-  virtual void OnWindowScrollTouchEnd() {}
   virtual void OnWindowSwipe(const std::string& direction) {}
   virtual void OnWindowRotateGesture(float rotation) {}
   virtual void OnWindowSheetBegin() {}
@@ -93,12 +91,12 @@ class NativeWindowObserver : public base::CheckedObserver {
   virtual void OnWindowLeaveHtmlFullScreen() {}
   virtual void OnWindowAlwaysOnTopChanged() {}
   virtual void OnTouchBarItemResult(const std::string& item_id,
-                                    const base::DictionaryValue& details) {}
+                                    const base::Value::Dict& details) {}
   virtual void OnNewWindowForTab() {}
   virtual void OnSystemContextMenu(int x, int y, bool* prevent_default) {}
 
 // Called when window message received
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   virtual void OnWindowMessage(UINT message, WPARAM w_param, LPARAM l_param) {}
 #endif
 

@@ -15,17 +15,15 @@
 #include "shell/common/gin_helper/error_thrower.h"
 #include "shell/common/gin_helper/promise.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "shell/browser/browser.h"
 #include "shell/browser/browser_observer.h"
 #include "ui/gfx/sys_color_change_listener.h"
 #endif
 
-namespace electron {
+namespace electron::api {
 
-namespace api {
-
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 enum class NotificationCenterKind {
   kNSDistributedNotificationCenter = 0,
   kNSNotificationCenter,
@@ -36,7 +34,7 @@ enum class NotificationCenterKind {
 class SystemPreferences
     : public gin::Wrappable<SystemPreferences>,
       public gin_helper::EventEmitterMixin<SystemPreferences>
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     ,
       public BrowserObserver,
       public gfx::SysColorChangeListener
@@ -51,14 +49,14 @@ class SystemPreferences
       v8::Isolate* isolate) override;
   const char* GetTypeName() override;
 
-#if defined(OS_WIN) || defined(OS_MAC)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
   std::string GetAccentColor();
   std::string GetColor(gin_helper::ErrorThrower thrower,
                        const std::string& color);
   std::string GetMediaAccessStatus(gin_helper::ErrorThrower thrower,
                                    const std::string& media_type);
 #endif
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   bool IsAeroGlassEnabled();
 
   void InitializeWindow();
@@ -67,26 +65,26 @@ class SystemPreferences
   void OnSysColorChange() override;
 
   // BrowserObserver:
-  void OnFinishLaunching(const base::DictionaryValue& launch_info) override;
+  void OnFinishLaunching(base::Value::Dict launch_info) override;
 
-#elif defined(OS_MAC)
+#elif BUILDFLAG(IS_MAC)
   using NotificationCallback = base::RepeatingCallback<
-      void(const std::string&, base::DictionaryValue, const std::string&)>;
+      void(const std::string&, base::Value, const std::string&)>;
 
   void PostNotification(const std::string& name,
-                        base::DictionaryValue user_info,
+                        base::Value::Dict user_info,
                         gin::Arguments* args);
-  int SubscribeNotification(const std::string& name,
+  int SubscribeNotification(v8::Local<v8::Value> maybe_name,
                             const NotificationCallback& callback);
   void UnsubscribeNotification(int id);
   void PostLocalNotification(const std::string& name,
-                             base::DictionaryValue user_info);
-  int SubscribeLocalNotification(const std::string& name,
+                             base::Value::Dict user_info);
+  int SubscribeLocalNotification(v8::Local<v8::Value> maybe_name,
                                  const NotificationCallback& callback);
   void UnsubscribeLocalNotification(int request_id);
   void PostWorkspaceNotification(const std::string& name,
-                                 base::DictionaryValue user_info);
-  int SubscribeWorkspaceNotification(const std::string& name,
+                                 base::Value::Dict user_info);
+  int SubscribeWorkspaceNotification(v8::Local<v8::Value> maybe_name,
                                      const NotificationCallback& callback);
   void UnsubscribeWorkspaceNotification(int request_id);
   v8::Local<v8::Value> GetUserDefault(v8::Isolate* isolate,
@@ -129,15 +127,15 @@ class SystemPreferences
   SystemPreferences();
   ~SystemPreferences() override;
 
-#if defined(OS_MAC)
-  int DoSubscribeNotification(const std::string& name,
+#if BUILDFLAG(IS_MAC)
+  int DoSubscribeNotification(v8::Local<v8::Value> maybe_name,
                               const NotificationCallback& callback,
                               NotificationCenterKind kind);
   void DoUnsubscribeNotification(int request_id, NotificationCenterKind kind);
 #endif
 
  private:
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Static callback invoked when a message comes in to our messaging window.
   static LRESULT CALLBACK WndProcStatic(HWND hwnd,
                                         UINT message,
@@ -160,7 +158,7 @@ class SystemPreferences
 
   std::string current_color_;
 
-  bool invertered_color_scheme_ = false;
+  bool inverted_color_scheme_ = false;
 
   bool high_contrast_color_scheme_ = false;
 
@@ -168,8 +166,6 @@ class SystemPreferences
 #endif
 };
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 #endif  // ELECTRON_SHELL_BROWSER_API_ELECTRON_API_SYSTEM_PREFERENCES_H_

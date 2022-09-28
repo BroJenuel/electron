@@ -20,13 +20,15 @@
 #include "ui/display/screen.h"
 #include "ui/gfx/geometry/point.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "ui/display/win/screen_win.h"
 #endif
 
-namespace electron {
+#if defined(USE_OZONE)
+#include "ui/ozone/public/ozone_platform.h"
+#endif
 
-namespace api {
+namespace electron::api {
 
 gin::WrapperInfo Screen::kWrapperInfo = {gin::kEmbedderNativeGin};
 
@@ -70,7 +72,18 @@ Screen::~Screen() {
   screen_->RemoveObserver(this);
 }
 
-gfx::Point Screen::GetCursorScreenPoint() {
+gfx::Point Screen::GetCursorScreenPoint(v8::Isolate* isolate) {
+#if defined(USE_OZONE)
+  // Wayland will crash unless a window is created prior to calling
+  // GetCursorScreenPoint.
+  if (!ui::OzonePlatform::IsInitialized()) {
+    gin_helper::ErrorThrower thrower(isolate);
+    thrower.ThrowError(
+        "screen.getCursorScreenPoint() cannot be called before a window has "
+        "been created.");
+    return gfx::Point();
+  }
+#endif
   return screen_->GetCursorScreenPoint();
 }
 
@@ -90,7 +103,7 @@ display::Display Screen::GetDisplayMatching(const gfx::Rect& match_rect) {
   return screen_->GetDisplayMatching(match_rect);
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 
 static gfx::Rect ScreenToDIPRect(electron::NativeWindow* window,
                                  const gfx::Rect& rect) {
@@ -153,7 +166,7 @@ gin::ObjectTemplateBuilder Screen::GetObjectTemplateBuilder(
       .SetMethod("getPrimaryDisplay", &Screen::GetPrimaryDisplay)
       .SetMethod("getAllDisplays", &Screen::GetAllDisplays)
       .SetMethod("getDisplayNearestPoint", &Screen::GetDisplayNearestPoint)
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       .SetMethod("screenToDipPoint", &display::win::ScreenWin::ScreenToDIPPoint)
       .SetMethod("dipToScreenPoint", &display::win::ScreenWin::DIPToScreenPoint)
       .SetMethod("screenToDipRect", &ScreenToDIPRect)
@@ -166,9 +179,7 @@ const char* Screen::GetTypeName() {
   return "Screen";
 }
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 namespace {
 
@@ -185,4 +196,4 @@ void Initialize(v8::Local<v8::Object> exports,
 
 }  // namespace
 
-NODE_LINKED_MODULE_CONTEXT_AWARE(electron_common_screen, Initialize)
+NODE_LINKED_MODULE_CONTEXT_AWARE(electron_browser_screen, Initialize)

@@ -14,8 +14,9 @@
 #include "gin/wrappable.h"
 #include "shell/common/gin_helper/error_thrower.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia_rep.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/files/file_path.h"
 #include "base/win/scoped_gdi_object.h"
 #endif
@@ -39,14 +40,12 @@ namespace gin {
 class Arguments;
 }
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 class NativeImage : public gin::Wrappable<NativeImage> {
  public:
   NativeImage(v8::Isolate* isolate, const gfx::Image& image);
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   NativeImage(v8::Isolate* isolate, const base::FilePath& hicon_path);
 #endif
   ~NativeImage() override;
@@ -78,7 +77,7 @@ class NativeImage : public gin::Wrappable<NativeImage> {
                                                     const GURL& url);
   static gin::Handle<NativeImage> CreateFromNamedImage(gin::Arguments* args,
                                                        std::string name);
-#if !defined(OS_LINUX)
+#if !BUILDFLAG(IS_LINUX)
   static v8::Local<v8::Promise> CreateThumbnailFromPath(
       v8::Isolate* isolate,
       const base::FilePath& path,
@@ -99,7 +98,7 @@ class NativeImage : public gin::Wrappable<NativeImage> {
       v8::Isolate* isolate) override;
   const char* GetTypeName() override;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   HICON GetHICON(int size);
 #endif
 
@@ -113,7 +112,7 @@ class NativeImage : public gin::Wrappable<NativeImage> {
   v8::Local<v8::Value> GetBitmap(gin::Arguments* args);
   v8::Local<v8::Value> GetNativeHandle(gin_helper::ErrorThrower thrower);
   gin::Handle<NativeImage> Resize(gin::Arguments* args,
-                                  base::DictionaryValue options);
+                                  base::Value::Dict options);
   gin::Handle<NativeImage> Crop(v8::Isolate* isolate, const gfx::Rect& rect);
   std::string ToDataURL(gin::Arguments* args);
   bool IsEmpty();
@@ -121,14 +120,14 @@ class NativeImage : public gin::Wrappable<NativeImage> {
   float GetAspectRatio(const absl::optional<float> scale_factor);
   void AddRepresentation(const gin_helper::Dictionary& options);
 
-  void AdjustAmountOfExternalAllocatedMemory(bool add);
+  void UpdateExternalAllocatedMemoryUsage();
 
   // Mark the image as template image.
   void SetTemplateImage(bool setAsTemplate);
   // Determine if the image is a template image.
   bool IsTemplateImage();
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   base::FilePath hicon_path_;
   std::map<int, base::win::ScopedHICON> hicons_;
 #endif
@@ -136,10 +135,9 @@ class NativeImage : public gin::Wrappable<NativeImage> {
   gfx::Image image_;
 
   v8::Isolate* isolate_;
+  int32_t memory_usage_ = 0;
 };
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 #endif  // ELECTRON_SHELL_COMMON_API_ELECTRON_API_NATIVE_IMAGE_H_

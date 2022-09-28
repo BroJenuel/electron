@@ -13,6 +13,7 @@
 #include "shell/browser/native_window_views.h"
 #include "shell/browser/ui/views/frameless_view.h"
 #include "shell/browser/ui/views/win_caption_button.h"
+#include "shell/browser/ui/views/win_caption_button_container.h"
 
 namespace electron {
 
@@ -30,6 +31,9 @@ class WinFrameView : public FramelessView {
 
   SkColor GetReadableFeatureColor(SkColor background_color);
 
+  // Tells the NonClientView to invalidate the WinFrameView's caption buttons.
+  void InvalidateCaptionButtons();
+
   // views::NonClientFrameView:
   gfx::Rect GetWindowBoundsForClientBounds(
       const gfx::Rect& client_bounds) const override;
@@ -40,6 +44,9 @@ class WinFrameView : public FramelessView {
 
   NativeWindowViews* window() const { return window_; }
   views::Widget* frame() const { return frame_; }
+  WinCaptionButtonContainer* caption_button_container() {
+    return caption_button_container_;
+  }
 
   bool IsMaximized() const;
 
@@ -58,6 +65,9 @@ class WinFrameView : public FramelessView {
 
   int FrameBorderThickness() const;
 
+  // views::ViewTargeterDelegate:
+  views::View* TargetForRect(views::View* root, const gfx::Rect& rect) override;
+
   // Returns the thickness of the window border for the top edge of the frame,
   // which is sometimes different than FrameBorderThickness(). Does not include
   // the titlebar/tabstrip area. If |restored| is true, this is calculated as if
@@ -67,7 +77,7 @@ class WinFrameView : public FramelessView {
 
   // Returns the height of the titlebar for popups or other browser types that
   // don't have tabs.
-  int TitlebarHeight(bool restored) const;
+  int TitlebarHeight(int custom_height) const;
 
   // Returns the y coordinate for the top of the frame, which in maximized mode
   // is the top of the screen and in restored mode is 1 pixel below the top of

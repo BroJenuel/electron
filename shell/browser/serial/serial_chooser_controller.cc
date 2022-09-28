@@ -41,11 +41,11 @@ struct Converter<device::mojom::SerialPortInfoPtr> {
     if (port->serial_number && !port->serial_number->empty()) {
       dict.Set("serialNumber", *port->serial_number);
     }
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
     if (port->usb_driver_name && !port->usb_driver_name->empty()) {
       dict.Set("usbDriverName", *port->usb_driver_name);
     }
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
     if (!port->device_instance_id.empty()) {
       dict.Set("deviceInstanceId", port->device_instance_id);
     }
@@ -69,7 +69,7 @@ SerialChooserController::SerialChooserController(
       callback_(std::move(callback)),
       serial_delegate_(serial_delegate),
       render_frame_host_id_(render_frame_host->GetGlobalId()) {
-  origin_ = web_contents->GetMainFrame()->GetLastCommittedOrigin();
+  origin_ = web_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin();
 
   chooser_context_ = SerialChooserContextFactory::GetForBrowserContext(
                          web_contents->GetBrowserContext())
@@ -77,13 +77,11 @@ SerialChooserController::SerialChooserController(
   DCHECK(chooser_context_);
   chooser_context_->GetPortManager()->GetDevices(base::BindOnce(
       &SerialChooserController::OnGetDevices, weak_factory_.GetWeakPtr()));
+  observation_.Observe(chooser_context_.get());
 }
 
 SerialChooserController::~SerialChooserController() {
   RunCallback(/*port=*/nullptr);
-  if (chooser_context_) {
-    chooser_context_->RemovePortObserver(this);
-  }
 }
 
 api::Session* SerialChooserController::GetSession() {
@@ -114,6 +112,14 @@ void SerialChooserController::OnPortRemoved(
     }
     ports_.erase(it);
   }
+}
+
+void SerialChooserController::OnPortManagerConnectionError() {
+  observation_.Reset();
+}
+
+void SerialChooserController::OnSerialChooserContextShutdown() {
+  observation_.Reset();
 }
 
 void SerialChooserController::OnDeviceChosen(const std::string& port_id) {

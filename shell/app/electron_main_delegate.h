@@ -30,12 +30,14 @@ class ElectronMainDelegate : public content::ContentMainDelegate {
   ElectronMainDelegate(const ElectronMainDelegate&) = delete;
   ElectronMainDelegate& operator=(const ElectronMainDelegate&) = delete;
 
+  base::StringPiece GetBrowserV8SnapshotFilename() override;
+
  protected:
   // content::ContentMainDelegate:
-  bool BasicStartupComplete(int* exit_code) override;
+  absl::optional<int> BasicStartupComplete() override;
   void PreSandboxStartup() override;
   void SandboxInitialized(const std::string& process_type) override;
-  void PreBrowserMain() override;
+  absl::optional<int> PreBrowserMain() override;
   content::ContentBrowserClient* CreateContentBrowserClient() override;
   content::ContentGpuClient* CreateContentGpuClient() override;
   content::ContentRendererClient* CreateContentRendererClient() override;
@@ -43,14 +45,14 @@ class ElectronMainDelegate : public content::ContentMainDelegate {
   absl::variant<int, content::MainFunctionParams> RunProcess(
       const std::string& process_type,
       content::MainFunctionParams main_function_params) override;
-  bool ShouldCreateFeatureList() override;
+  bool ShouldCreateFeatureList(InvokedIn invoked_in) override;
   bool ShouldLockSchemeRegistry() override;
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
   void ZygoteForked() override;
 #endif
 
  private:
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   void OverrideChildProcessPath();
   void OverrideFrameworkBundlePath();
   void SetUpBundleOverrides();

@@ -4,6 +4,13 @@ import { IpcMainInvokeEvent } from 'electron/main';
 export class IpcMainImpl extends EventEmitter {
   private _invokeHandlers: Map<string, (e: IpcMainInvokeEvent, ...args: any[]) => void> = new Map();
 
+  constructor () {
+    super();
+
+    // Do not throw exception when channel name is "error".
+    this.on('error', () => {});
+  }
+
   handle: Electron.IpcMain['handle'] = (method, fn) => {
     if (this._invokeHandlers.has(method)) {
       throw new Error(`Attempted to register a second handler for '${method}'`);
@@ -15,7 +22,7 @@ export class IpcMainImpl extends EventEmitter {
       try {
         e._reply(await Promise.resolve(fn(e, ...args)));
       } catch (err) {
-        e._throw(err);
+        e._throw(err as Error);
       }
     });
   }

@@ -20,7 +20,7 @@ const spawnUpdate = function (args: string[], detached: boolean, callback: Funct
 
   try {
     // Ensure we don't spawn multiple squirrel processes
-    // Process spawned, same args:        Attach events to alread running process
+    // Process spawned, same args:        Attach events to already running process
     // Process spawned, different args:   Return with error
     // No process spawned:                Spawn new process
     if (spawnedProcess && !isSameArgs(args)) {
@@ -35,7 +35,7 @@ const spawnUpdate = function (args: string[], detached: boolean, callback: Funct
       spawnedArgs = args || [];
     }
   } catch (error1) {
-    error = error1;
+    error = error1 as Error;
 
     // Shouldn't happen, but still guard it.
     process.nextTick(function () {
@@ -68,7 +68,7 @@ const spawnUpdate = function (args: string[], detached: boolean, callback: Funct
     if (code !== 0) {
       // Disabled for backwards compatibility:
       // eslint-disable-next-line standard/no-callback-literal
-      return callback(`Command failed: ${signal != null ? signal : code}\n${stderr}`);
+      return callback(`Command failed: ${signal ?? code}\n${stderr}`);
     }
 
     // Success.

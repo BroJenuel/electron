@@ -43,7 +43,7 @@ class MenuBar : public views::AccessiblePaneView,
   void ActivateAccelerator(char16_t key);
 
   // Returns there are how many items in the root menu.
-  int GetItemCount() const;
+  size_t GetItemCount() const;
 
   // Get the menu under specified screen point.
   bool GetMenuButtonFromScreenPoint(const gfx::Point& point,
@@ -71,7 +71,7 @@ class MenuBar : public views::AccessiblePaneView,
   const char* GetClassName() const override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
-  void ButtonPressed(int id, const ui::Event& event);
+  void ButtonPressed(size_t id, const ui::Event& event);
 
   void RebuildChildren();
   void UpdateViewColors();
@@ -79,7 +79,7 @@ class MenuBar : public views::AccessiblePaneView,
   View* FindAccelChild(char16_t key);
 
   SkColor background_color_;
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
   SkColor enabled_color_;
   SkColor disabled_color_;
 #endif

@@ -11,13 +11,11 @@
 #include "shell/common/gin_helper/pinnable.h"
 #include "ui/base/idle/idle.h"
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
 #include "shell/browser/lib/power_observer_linux.h"
 #endif
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 class PowerMonitor : public gin::Wrappable<PowerMonitor>,
                      public gin_helper::EventEmitterMixin<PowerMonitor>,
@@ -41,14 +39,14 @@ class PowerMonitor : public gin::Wrappable<PowerMonitor>,
   explicit PowerMonitor(v8::Isolate* isolate);
   ~PowerMonitor() override;
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
   void SetListeningForShutdown(bool);
 #endif
 
   // Called by native calles.
   bool ShouldShutdown();
 
-#if defined(OS_MAC) || defined(OS_WIN)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
   void InitPlatformSpecificMonitors();
 #endif
 
@@ -59,7 +57,7 @@ class PowerMonitor : public gin::Wrappable<PowerMonitor>,
   void OnSuspend() override;
   void OnResume() override;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Static callback invoked when a message comes in to our messaging window.
   static LRESULT CALLBACK WndProcStatic(HWND hwnd,
                                         UINT message,
@@ -81,13 +79,11 @@ class PowerMonitor : public gin::Wrappable<PowerMonitor>,
   HWND window_;
 #endif
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
   PowerObserverLinux power_observer_linux_{this};
 #endif
 };
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 #endif  // ELECTRON_SHELL_BROWSER_API_ELECTRON_API_POWER_MONITOR_H_

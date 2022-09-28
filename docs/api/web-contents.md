@@ -35,7 +35,7 @@ for all windows, webviews, opened devtools, and devtools extension background pa
 
 ### `webContents.getFocusedWebContents()`
 
-Returns `WebContents` - The web contents that is focused in this application, otherwise
+Returns `WebContents` | null - The web contents that is focused in this application, otherwise
 returns `null`.
 
 ### `webContents.fromId(id)`
@@ -44,6 +44,13 @@ returns `null`.
 
 Returns `WebContents` | undefined - A WebContents instance with the given ID, or
 `undefined` if there is no WebContents associated with the given ID.
+
+### `webContents.fromFrame(frame)`
+
+* `frame` WebFrameMain
+
+Returns `WebContents` | undefined - A WebContents instance with the given WebFrameMain, or
+`undefined` if there is no WebContents associated with the given WebFrameMain.
 
 ### `webContents.fromDevToolsTargetId(targetId)`
 
@@ -92,7 +99,7 @@ Returns:
 * `frameRoutingId` Integer
 
 This event is like `did-finish-load` but emitted when the load failed.
-The full list of error codes and their meaning is available [here](https://source.chromium.org/chromium/chromium/src/+/master:net/base/net_error_list.h).
+The full list of error codes and their meaning is available [here](https://source.chromium.org/chromium/chromium/src/+/main:net/base/net_error_list.h).
 
 #### Event: 'did-fail-provisional-load'
 
@@ -130,10 +137,6 @@ Corresponds to the points in time when the spinner of the tab stopped spinning.
 
 #### Event: 'dom-ready'
 
-Returns:
-
-* `event` Event
-
 Emitted when the document in the top-level frame is loaded.
 
 #### Event: 'page-title-updated'
@@ -156,63 +159,17 @@ Returns:
 
 Emitted when page receives favicon urls.
 
-#### Event: 'new-window' _Deprecated_
+#### Event: 'content-bounds-updated'
 
 Returns:
 
-* `event` NewWindowWebContentsEvent
-* `url` string
-* `frameName` string
-* `disposition` string - Can be `default`, `foreground-tab`, `background-tab`,
-  `new-window`, `save-to-disk` and `other`.
-* `options` BrowserWindowConstructorOptions - The options which will be used for creating the new
-  [`BrowserWindow`](browser-window.md).
-* `additionalFeatures` string[] - The non-standard features (features not handled
-  by Chromium or Electron) given to `window.open()`. Deprecated, and will now
-  always be the empty array `[]`.
-* `referrer` [Referrer](structures/referrer.md) - The referrer that will be
-  passed to the new window. May or may not result in the `Referer` header being
-  sent, depending on the referrer policy.
-* `postBody` [PostBody](structures/post-body.md) (optional) - The post data that
-  will be sent to the new window, along with the appropriate headers that will
-  be set. If no post data is to be sent, the value will be `null`. Only defined
-  when the window is being created by a form that set `target=_blank`.
+* `event` Event
+* `bounds` [Rectangle](structures/rectangle.md) - requested new content bounds
 
-Deprecated in favor of [`webContents.setWindowOpenHandler`](web-contents.md#contentssetwindowopenhandlerhandler).
+Emitted when the page calls `window.moveTo`, `window.resizeTo` or related APIs.
 
-Emitted when the page requests to open a new window for a `url`. It could be
-requested by `window.open` or an external link like `<a target='_blank'>`.
-
-By default a new `BrowserWindow` will be created for the `url`.
-
-Calling `event.preventDefault()` will prevent Electron from automatically creating a
-new [`BrowserWindow`](browser-window.md). If you call `event.preventDefault()` and manually create a new
-[`BrowserWindow`](browser-window.md) then you must set `event.newGuest` to reference the new [`BrowserWindow`](browser-window.md)
-instance, failing to do so may result in unexpected behavior. For example:
-
-```javascript
-myBrowserWindow.webContents.on('new-window', (event, url, frameName, disposition, options, additionalFeatures, referrer, postBody) => {
-  event.preventDefault()
-  const win = new BrowserWindow({
-    webContents: options.webContents, // use existing webContents if provided
-    show: false
-  })
-  win.once('ready-to-show', () => win.show())
-  if (!options.webContents) {
-    const loadOptions = {
-      httpReferrer: referrer
-    }
-    if (postBody != null) {
-      const { data, contentType, boundary } = postBody
-      loadOptions.postData = postBody.data
-      loadOptions.extraHeaders = `content-type: ${contentType}; boundary=${boundary}`
-    }
-
-    win.loadURL(url, loadOptions) // existing webContents will be navigated automatically
-  }
-  event.newGuest = win
-})
-```
+By default, this will move the window. To prevent that behavior, call
+`event.preventDefault()`.
 
 #### Event: 'did-create-window'
 
@@ -290,7 +247,7 @@ Returns:
 * `frameProcessId` Integer
 * `frameRoutingId` Integer
 
-Emitted as a server side redirect occurs during navigation.  For example a 302
+Emitted when a server side redirect occurs during navigation.  For example a 302
 redirect.
 
 This event will be emitted after `did-start-navigation` and always before the
@@ -454,6 +411,16 @@ Emitted when a plugin process has crashed.
 
 Emitted when `webContents` is destroyed.
 
+#### Event: 'input-event'
+
+Returns:
+
+* `event` Event
+* `inputEvent` [InputEvent](structures/input-event.md)
+
+Emitted when an input event is sent to the WebContents. See
+[InputEvent](structures/input-event.md) for details.
+
 #### Event: 'before-input-event'
 
 Returns:
@@ -507,6 +474,23 @@ Returns:
 * `zoomDirection` string - Can be `in` or `out`.
 
 Emitted when the user is requesting to change the zoom level using the mouse wheel.
+
+#### Event: 'blur'
+
+Emitted when the `WebContents` loses focus.
+
+#### Event: 'focus'
+
+Emitted when the `WebContents` gains focus.
+
+Note that on macOS, having focus means the `WebContents` is the first responder
+of window, so switching focus between windows would not trigger the `focus` and
+`blur` events of `WebContents`, as the first responder of each window is not
+changed.
+
+The `focus` and `blur` events of `WebContents` should only be used to detect
+focus change between different `WebContents` and `BrowserView` in the same
+window.
 
 #### Event: 'devtools-opened'
 
@@ -736,6 +720,8 @@ first available device will be selected. `callback` should be called with
 `deviceId` to be selected, passing empty string to `callback` will
 cancel the request.
 
+If no event listener is added for this event, all bluetooth requests will be cancelled.
+
 ```javascript
 const { app, BrowserWindow } = require('electron')
 
@@ -801,9 +787,6 @@ This event can be used to configure `webPreferences` for the `webContents`
 of a `<webview>` before it's loaded, and provides the ability to set settings
 that can't be set via `<webview>` attributes.
 
-**Note:** The specified `preload` script option will appear as `preloadURL`
-(not `preload`) in the `webPreferences` object emitted with this event.
-
 #### Event: 'did-attach-webview'
 
 Returns:
@@ -846,6 +829,8 @@ Returns:
 
 Emitted when the renderer process sends an asynchronous message via `ipcRenderer.send()`.
 
+See also [`webContents.ipc`](#contentsipc-readonly), which provides an [`IpcMain`](ipc-main.md)-like interface for responding to IPC messages specifically from this WebContents.
+
 #### Event: 'ipc-message-sync'
 
 Returns:
@@ -855,6 +840,8 @@ Returns:
 * `...args` any[]
 
 Emitted when the renderer process sends a synchronous message via `ipcRenderer.sendSync()`.
+
+See also [`webContents.ipc`](#contentsipc-readonly), which provides an [`IpcMain`](ipc-main.md)-like interface for responding to IPC messages specifically from this WebContents.
 
 #### Event: 'preferred-size-changed'
 
@@ -963,6 +950,21 @@ Returns `string` - The title of the current web page.
 #### `contents.isDestroyed()`
 
 Returns `boolean` - Whether the web page is destroyed.
+
+#### `contents.close([opts])`
+
+* `opts` Object (optional)
+  * `waitForBeforeUnload` boolean - if true, fire the `beforeunload` event
+    before closing the page. If the page prevents the unload, the WebContents
+    will not be closed. The [`will-prevent-unload`](#event-will-prevent-unload)
+    will be fired if the page requests prevention of unload.
+
+Closes the page, as if the web content had called `window.close()`.
+
+If the page is successfully closed (i.e. the unload is not prevented by the
+page, or `waitForBeforeUnload` is false or unspecified), the WebContents will
+be destroyed and no longer usable. The [`destroyed`](#event-destroyed) event
+will be emitted.
 
 #### `contents.focus()`
 
@@ -1082,7 +1084,7 @@ Returns `string` - The user agent for this web page.
 
 * `css` string
 * `options` Object (optional)
-  * `cssOrigin` string (optional) - Can be either 'user' or 'author'; Specifying 'user' enables you to prevent websites from overriding the CSS you insert. Default is 'author'.
+  * `cssOrigin` string (optional) - Can be either 'user' or 'author'. Sets the [cascade origin](https://www.w3.org/TR/css3-cascade/#cascade-origin) of the inserted stylesheet. Default is 'author'.
 
 Returns `Promise<string>` - A promise that resolves with a key for the inserted CSS that can later be used to remove the CSS via `contents.removeInsertedCSS(key)`.
 
@@ -1412,7 +1414,7 @@ Returns `Promise<PrinterInfo[]>` - Resolves with a [`PrinterInfo[]`](structures/
   * `header` string (optional) - string to be printed as page header.
   * `footer` string (optional) - string to be printed as page footer.
   * `pageSize` string | Size (optional) - Specify page size of the printed document. Can be `A3`,
-  `A4`, `A5`, `Legal`, `Letter`, `Tabloid` or an Object containing `height`.
+  `A4`, `A5`, `Legal`, `Letter`, `Tabloid` or an Object containing `height` and `width`.
 * `callback` Function (optional)
   * `success` boolean - Indicates success of the print call.
   * `failureReason` string - Error description called back if the print fails.
@@ -1443,42 +1445,27 @@ win.webContents.print(options, (success, errorType) => {
 #### `contents.printToPDF(options)`
 
 * `options` Object
-  * `headerFooter` Record<string, string> (optional) - the header and footer for the PDF.
-    * `title` string - The title for the PDF header.
-    * `url` string - the url for the PDF footer.
-  * `landscape` boolean (optional) - `true` for landscape, `false` for portrait.
-  * `marginsType` Integer (optional) - Specifies the type of margins to use. Uses 0 for
-    default margin, 1 for no margin, and 2 for minimum margin.
-  * `scaleFactor` number (optional) - The scale factor of the web page. Can range from 0 to 100.
-  * `pageRanges` Record<string, number> (optional) - The page range to print.
-    * `from` number - Index of the first page to print (0-based).
-    * `to` number - Index of the last page to print (inclusive) (0-based).
-  * `pageSize` string | Size (optional) - Specify page size of the generated PDF. Can be `A3`,
-  `A4`, `A5`, `Legal`, `Letter`, `Tabloid` or an Object containing `height` and `width` in microns.
-  * `printBackground` boolean (optional) - Whether to print CSS backgrounds.
-  * `printSelectionOnly` boolean (optional) - Whether to print selection only.
+  * `landscape` boolean (optional) - Paper orientation.`true` for landscape, `false` for portrait. Defaults to false.
+  * `displayHeaderFooter` boolean (optional) - Whether to display header and footer. Defaults to false.
+  * `printBackground` boolean (optional) - Whether to print background graphics. Defaults to false.
+  * `scale` number(optional)  - Scale of the webpage rendering. Defaults to 1.
+  * `pageSize` string | Size (optional) - Specify page size of the generated PDF. Can be `A0`, `A1`, `A2`, `A3`,
+  `A4`, `A5`, `A6`, `Legal`, `Letter`, `Tabloid`, `Ledger`, or an Object containing `height` and `width` in inches. Defaults to `Letter`.
+  * `margins` Object (optional)
+    * `top` number (optional) - Top margin in inches. Defaults to 1cm (~0.4 inches).
+    * `bottom` number (optional) - Bottom margin in inches. Defaults to 1cm (~0.4 inches).
+    * `left` number (optional) - Left margin in inches. Defaults to 1cm (~0.4 inches).
+    * `right` number (optional) - Right margin in inches. Defaults to 1cm (~0.4 inches).
+  * `pageRanges` string (optional) - Paper ranges to print, e.g., '1-5, 8, 11-13'. Defaults to the empty string, which means print all pages.
+  * `headerTemplate` string (optional) - HTML template for the print header. Should be valid HTML markup with following classes used to inject printing values into them: `date` (formatted print date), `title` (document title), `url` (document location), `pageNumber` (current page number) and `totalPages` (total pages in the document). For example, `<span class=title></span>` would generate span containing the title.
+  * `footerTemplate` string (optional) - HTML template for the print footer. Should use the same format as the `headerTemplate`.
+  * `preferCSSPageSize` boolean (optional) - Whether or not to prefer page size as defined by css. Defaults to false, in which case the content will be scaled to fit the paper size.
 
 Returns `Promise<Buffer>` - Resolves with the generated PDF data.
 
-Prints window's web page as PDF with Chromium's preview printing custom
-settings.
+Prints the window's web page as PDF.
 
 The `landscape` will be ignored if `@page` CSS at-rule is used in the web page.
-
-By default, an empty `options` will be regarded as:
-
-```javascript
-{
-  marginsType: 0,
-  printBackground: false,
-  printSelectionOnly: false,
-  landscape: false,
-  pageSize: 'A4',
-  scaleFactor: 100
-}
-```
-
-Use `page-break-before: always;` CSS style to force to print to a new page.
 
 An example of `webContents.printToPDF`:
 
@@ -1488,7 +1475,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 
-const win = new BrowserWindow({ width: 800, height: 600 })
+const win = new BrowserWindow()
 win.loadURL('http://github.com')
 
 win.webContents.on('did-finish-load', () => {
@@ -1504,6 +1491,8 @@ win.webContents.on('did-finish-load', () => {
   })
 })
 ```
+
+See [Page.printToPdf](https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-printToPDF) for more information.
 
 #### `contents.addWorkSpace(path)`
 
@@ -1609,7 +1598,7 @@ app.whenReady().then(() => {
 
 * `options` Object (optional)
   * `mode` string - Opens the devtools with specified dock state, can be
-    `right`, `bottom`, `undocked`, `detach`. Defaults to last used dock state.
+    `left`, `right`, `bottom`, `undocked`, `detach`. Defaults to last used dock state.
     In `undocked` mode it's possible to dock back. In `detach` mode it's not.
   * `activate` boolean (optional) - Whether to bring the opened devtools window
     to the foreground. The default is `true`.
@@ -1618,6 +1607,8 @@ Opens the devtools.
 
 When `contents` is a `<webview>` tag, the `mode` would be `detach` by default,
 explicitly passing an empty `mode` can force using last used dock state.
+
+On Windows, if Windows Control Overlay is enabled, Devtools will be opened with `mode: 'detach'`.
 
 #### `contents.closeDevTools()`
 
@@ -1837,7 +1828,7 @@ the cursor when dragging.
 
 #### `contents.savePage(fullPath, saveType)`
 
-* `fullPath` string - The full file path.
+* `fullPath` string - The absolute file path.
 * `saveType` string - Specify the save type.
   * `HTMLOnly` - Save only the HTML of the page.
   * `HTMLComplete` - Save complete-html page.
@@ -1982,6 +1973,35 @@ This corresponds to the [animationPolicy][] accessibility feature in Chromium.
 
 ### Instance Properties
 
+#### `contents.ipc` _Readonly_
+
+An [`IpcMain`](ipc-main.md) scoped to just IPC messages sent from this
+WebContents.
+
+IPC messages sent with `ipcRenderer.send`, `ipcRenderer.sendSync` or
+`ipcRenderer.postMessage` will be delivered in the following order:
+
+1. `contents.on('ipc-message')`
+2. `contents.mainFrame.on(channel)`
+3. `contents.ipc.on(channel)`
+4. `ipcMain.on(channel)`
+
+Handlers registered with `invoke` will be checked in the following order. The
+first one that is defined will be called, the rest will be ignored.
+
+1. `contents.mainFrame.handle(channel)`
+2. `contents.handle(channel)`
+3. `ipcMain.handle(channel)`
+
+A handler or event listener registered on the WebContents will receive IPC
+messages sent from any frame, including child frames. In most cases, only the
+main frame can send IPC messages. However, if the `nodeIntegrationInSubFrames`
+option is enabled, it is possible for child frames to send IPC messages also.
+In that case, handlers should check the `senderFrame` property of the IPC event
+to ensure that the message is coming from the expected frame. Alternatively,
+register handlers on the appropriate frame directly using the
+[`WebFrameMain.ipc`](web-frame-main.md#frameipc-readonly) interface.
+
 #### `contents.audioMuted`
 
 A `boolean` property that determines whether this page is muted.
@@ -2040,6 +2060,11 @@ when the page becomes backgrounded. This also affects the Page Visibility API.
 #### `contents.mainFrame` _Readonly_
 
 A [`WebFrameMain`](web-frame-main.md) property that represents the top frame of the page's frame hierarchy.
+
+#### `contents.opener` _Readonly_
+
+A [`WebFrameMain`](web-frame-main.md) property that represents the frame that opened this WebContents, either
+with open(), or by navigating a link with a target attribute.
 
 [keyboardevent]: https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent
 [event-emitter]: https://nodejs.org/api/events.html#events_class_eventemitter

@@ -16,9 +16,7 @@
 #include "shell/common/gin_helper/constructible.h"
 #include "shell/common/gin_helper/pinnable.h"
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 class Menu : public gin::Wrappable<Menu>,
              public gin_helper::EventEmitterMixin<Menu>,
@@ -36,7 +34,7 @@ class Menu : public gin::Wrappable<Menu>,
   // gin::Wrappable
   static gin::WrapperInfo kWrapperInfo;
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   // Set the global menubar.
   static void SetApplicationMenu(Menu* menu);
 
@@ -68,7 +66,7 @@ class Menu : public gin::Wrappable<Menu>,
       bool use_default_accelerator,
       ui::Accelerator* accelerator) const override;
   bool ShouldRegisterAcceleratorForCommandId(int command_id) const override;
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   bool GetSharingItemForCommandId(
       int command_id,
       ElectronMenuModel::SharingItem* item) const override;
@@ -123,9 +121,7 @@ class Menu : public gin::Wrappable<Menu>,
   bool WorksWhenHiddenAt(int index) const;
 };
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 namespace gin {
 

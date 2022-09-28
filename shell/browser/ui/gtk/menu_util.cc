@@ -22,13 +22,15 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
 
-#if defined(USE_OZONE) || defined(USE_X11)
-#include "ui/base/ui_base_features.h"
+#if defined(USE_OZONE)
+#include "ui/ozone/buildflags.h"
+#if BUILDFLAG(OZONE_PLATFORM_X11)
+#define USE_OZONE_PLATFORM_X11
+#endif
+#include "ui/ozone/public/ozone_platform.h"
 #endif
 
-namespace electron {
-
-namespace gtkui {
+namespace electron::gtkui {
 
 namespace {
 
@@ -44,6 +46,8 @@ int EventFlagsFromGdkState(guint state) {
   flags |= (state & GDK_BUTTON3_MASK) ? ui::EF_RIGHT_MOUSE_BUTTON : ui::EF_NONE;
   return flags;
 }
+
+#if defined(USE_OZONE_PLATFORM_X11)
 
 guint GetGdkKeyCodeForAccelerator(const ui::Accelerator& accelerator) {
   // The second parameter is false because accelerator keys are expressed in
@@ -63,6 +67,8 @@ GdkModifierType GetGdkModifierForAccelerator(
     modifier |= GDK_MOD1_MASK;
   return static_cast<GdkModifierType>(modifier);
 }
+
+#endif
 
 }  // namespace
 
@@ -144,7 +150,7 @@ void ExecuteCommand(ui::MenuModel* model, int id) {
 
   if (event && event->type == GDK_BUTTON_RELEASE)
     event_flags = EventFlagsFromGdkState(event->button.state);
-  model->ActivatedAt(id, event_flags);
+  model->ActivatedAt(static_cast<int>(id), event_flags);
 
   if (event)
     gdk_event_free(event);
@@ -157,7 +163,7 @@ void BuildSubmenuFromModel(ui::MenuModel* model,
                            void* this_ptr) {
   std::map<int, GtkWidget*> radio_groups;
   GtkWidget* menu_item = nullptr;
-  for (int i = 0; i < model->GetItemCount(); ++i) {
+  for (size_t i = 0; i < model->GetItemCount(); ++i) {
     std::string label = ui::ConvertAcceleratorsFromWindowsStyle(
         base::UTF16ToUTF8(model->GetLabelAt(i)));
 
@@ -225,13 +231,17 @@ void BuildSubmenuFromModel(ui::MenuModel* model,
       connect_to_activate = false;
     }
 
-#if defined(USE_X11)
-    ui::Accelerator accelerator;
-    if (model->GetAcceleratorAt(i, &accelerator)) {
-      gtk_widget_add_accelerator(menu_item, "activate", nullptr,
-                                 GetGdkKeyCodeForAccelerator(accelerator),
-                                 GetGdkModifierForAccelerator(accelerator),
-                                 GTK_ACCEL_VISIBLE);
+#if defined(USE_OZONE_PLATFORM_X11)
+    if (ui::OzonePlatform::GetInstance()
+            ->GetPlatformProperties()
+            .electron_can_call_x11) {
+      ui::Accelerator accelerator;
+      if (model->GetAcceleratorAt(i, &accelerator)) {
+        gtk_widget_add_accelerator(menu_item, "activate", nullptr,
+                                   GetGdkKeyCodeForAccelerator(accelerator),
+                                   GetGdkModifierForAccelerator(accelerator),
+                                   GTK_ACCEL_VISIBLE);
+      }
     }
 #endif
 
@@ -318,6 +328,4 @@ void SetMenuItemInfo(GtkWidget* widget, void* block_activation_ptr) {
   }
 }
 
-}  // namespace gtkui
-
-}  // namespace electron
+}  // namespace electron::gtkui

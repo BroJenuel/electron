@@ -14,7 +14,7 @@
 #include "shell/browser/osr/osr_render_widget_host_view.h"
 #include "third_party/blink/public/common/page/drag_mojom_traits.h"
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 #ifdef __OBJC__
 @class OffScreenView;
 #else
@@ -63,8 +63,9 @@ class OffScreenWebContentsView : public content::WebContentsView,
                              content::RenderViewHost* new_host) override;
   void SetOverscrollControllerEnabled(bool enabled) override;
   void OnCapturerCountChanged() override;
+  void FullscreenStateChanged(bool is_fullscreen) override;
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   bool CloseTabAfterEventTrackingIfNeeded() override;
 #endif
 
@@ -72,7 +73,8 @@ class OffScreenWebContentsView : public content::WebContentsView,
   void StartDragging(const content::DropData& drop_data,
                      blink::DragOperationsMask allowed_ops,
                      const gfx::ImageSkia& image,
-                     const gfx::Vector2d& image_offset,
+                     const gfx::Vector2d& cursor_offset,
+                     const gfx::Rect& drag_obj_rect,
                      const blink::mojom::DragEventSourceInfo& event_info,
                      content::RenderWidgetHostImpl* source_rwh) override;
   void UpdateDragCursor(ui::mojom::DragOperation operation) override;
@@ -82,7 +84,7 @@ class OffScreenWebContentsView : public content::WebContentsView,
   int GetFrameRate() const;
 
  private:
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   void PlatformCreate();
   void PlatformDestroy();
 #endif
@@ -99,7 +101,7 @@ class OffScreenWebContentsView : public content::WebContentsView,
   // Weak refs.
   content::WebContents* web_contents_ = nullptr;
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   OffScreenView* offScreenView_;
 #endif
 };

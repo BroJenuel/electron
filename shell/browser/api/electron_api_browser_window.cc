@@ -10,10 +10,10 @@
 #include "content/browser/web_contents/web_contents_impl.h"  // nogncheck
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/common/color_parser.h"
 #include "shell/browser/api/electron_api_web_contents_view.h"
 #include "shell/browser/browser.h"
 #include "shell/browser/native_browser_view.h"
-#include "shell/browser/unresponsive_suppressor.h"
 #include "shell/browser/web_contents_preferences.h"
 #include "shell/browser/window_list.h"
 #include "shell/common/color_util.h"
@@ -24,9 +24,15 @@
 #include "shell/common/options_switches.h"
 #include "ui/gl/gpu_switching_manager.h"
 
-namespace electron {
+#if defined(TOOLKIT_VIEWS)
+#include "shell/browser/native_window_views.h"
+#endif
 
-namespace api {
+#if BUILDFLAG(IS_WIN)
+#include "shell/browser/ui/views/win_frame_view.h"
+#endif
+
+namespace electron::api {
 
 BrowserWindow::BrowserWindow(gin::Arguments* args,
                              const gin_helper::Dictionary& options)
@@ -37,18 +43,18 @@ BrowserWindow::BrowserWindow(gin::Arguments* args,
       gin::Dictionary::CreateEmpty(isolate);
   options.Get(options::kWebPreferences, &web_preferences);
 
-  v8::Local<v8::Value> value;
   bool transparent = false;
   options.Get(options::kTransparent, &transparent);
 
   std::string vibrancy_type;
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   options.Get(options::kVibrancyType, &vibrancy_type);
 #endif
 
   // Copy the backgroundColor to webContents.
-  if (options.Get(options::kBackgroundColor, &value)) {
-    web_preferences.SetHidden(options::kBackgroundColor, value);
+  std::string color;
+  if (options.Get(options::kBackgroundColor, &color)) {
+    web_preferences.SetHidden(options::kBackgroundColor, color);
   } else if (!vibrancy_type.empty() || transparent) {
     // If the BrowserWindow is transparent or a vibrancy type has been set,
     // also propagate transparency to the WebContents unless a separate
@@ -78,8 +84,8 @@ BrowserWindow::BrowserWindow(gin::Arguments* args,
     web_preferences.Set(options::kEnableBlinkFeatures, enabled_features);
   }
 
-  // Copy the webContents option to webPreferences. This is only used internally
-  // to implement nativeWindowOpen option.
+  // Copy the webContents option to webPreferences.
+  v8::Local<v8::Value> value;
   if (options.Get("webContents", &value)) {
     web_preferences.SetHidden("webContents", value);
   }
@@ -100,16 +106,12 @@ BrowserWindow::BrowserWindow(gin::Arguments* args,
   // Associate with BrowserWindow.
   web_contents->SetOwnerWindow(window());
 
-  auto* host = web_contents->web_contents()->GetRenderViewHost();
-  if (host)
-    host->GetWidget()->AddInputEventObserver(this);
-
   InitWithArgs(args);
 
   // Install the content view after BaseWindow's JS code is initialized.
   SetContentView(gin::CreateHandle<View>(isolate, web_contents_view.get()));
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   OverrideNSWindowContentView(
       web_contents->inspectable_web_contents()->GetView());
 #endif
@@ -122,56 +124,11 @@ BrowserWindow::~BrowserWindow() {
   if (api_web_contents_) {
     // Cleanup the observers if user destroyed this instance directly instead of
     // gracefully closing content::WebContents.
-    auto* host = web_contents()->GetRenderViewHost();
-    if (host)
-      host->GetWidget()->RemoveInputEventObserver(this);
     api_web_contents_->RemoveObserver(this);
     // Destroy the WebContents.
     OnCloseContents();
+    api_web_contents_->Destroy();
   }
-}
-
-void BrowserWindow::OnInputEvent(const blink::WebInputEvent& event) {
-  switch (event.GetType()) {
-    case blink::WebInputEvent::Type::kGestureScrollBegin:
-    case blink::WebInputEvent::Type::kGestureScrollUpdate:
-    case blink::WebInputEvent::Type::kGestureScrollEnd:
-      Emit("scroll-touch-edge");
-      break;
-    default:
-      break;
-  }
-}
-
-void BrowserWindow::RenderViewHostChanged(content::RenderViewHost* old_host,
-                                          content::RenderViewHost* new_host) {
-  if (old_host)
-    old_host->GetWidget()->RemoveInputEventObserver(this);
-  if (new_host)
-    new_host->GetWidget()->AddInputEventObserver(this);
-}
-
-void BrowserWindow::RenderFrameCreated(
-    content::RenderFrameHost* render_frame_host) {
-  if (!window()->transparent())
-    return;
-
-  content::RenderWidgetHostImpl* impl = content::RenderWidgetHostImpl::FromID(
-      render_frame_host->GetProcess()->GetID(),
-      render_frame_host->GetRoutingID());
-  if (impl)
-    impl->owner_delegate()->SetBackgroundOpaque(false);
-}
-
-void BrowserWindow::DidFirstVisuallyNonEmptyPaint() {
-  if (window()->IsClosed() || window()->IsVisible())
-    return;
-
-  // When there is a non-empty first paint, resize the RenderWidget to force
-  // Chromium to draw.
-  auto* const view = web_contents()->GetRenderWidgetHostView();
-  view->Show();
-  view->SetSize(window()->GetContentSize());
 }
 
 void BrowserWindow::BeforeUnloadDialogCancelled() {
@@ -198,7 +155,6 @@ void BrowserWindow::WebContentsDestroyed() {
 
 void BrowserWindow::OnCloseContents() {
   BaseWindow::ResetBrowserViews();
-  api_web_contents_->Destroy();
 }
 
 void BrowserWindow::OnRendererResponsive(content::RenderProcessHost*) {
@@ -219,7 +175,7 @@ void BrowserWindow::OnSetContentBounds(const gfx::Rect& rect) {
 
 void BrowserWindow::OnActivateContents() {
   // Hide the auto-hide menu when webContents is focused.
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
   if (IsMenuBarAutoHide() && IsMenuBarVisible())
     window()->SetMenuBarVisibility(false);
 #endif
@@ -281,7 +237,7 @@ void BrowserWindow::OnCloseButtonClicked(bool* prevent_default) {
   } else {
     web_contents()->Close();
   }
-}  // namespace api
+}
 
 void BrowserWindow::OnWindowBlur() {
   if (api_web_contents_)
@@ -294,7 +250,7 @@ void BrowserWindow::OnWindowFocus() {
   // focus/blur events might be emitted while closing window.
   if (api_web_contents_) {
     web_contents()->RestoreFocus();
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
     if (!api_web_contents_->IsDevToolsOpened())
       web_contents()->Focus();
 #endif
@@ -304,7 +260,7 @@ void BrowserWindow::OnWindowFocus() {
 }
 
 void BrowserWindow::OnWindowIsKeyChanged(bool is_key) {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   auto* rwhv = web_contents()->GetRenderWidgetHostView();
   if (rwhv)
     rwhv->SetActive(is_key);
@@ -313,7 +269,7 @@ void BrowserWindow::OnWindowIsKeyChanged(bool is_key) {
 }
 
 void BrowserWindow::OnWindowResize() {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   if (!draggable_regions_.empty()) {
     UpdateDraggableRegions(draggable_regions_);
   } else {
@@ -326,7 +282,7 @@ void BrowserWindow::OnWindowResize() {
 }
 
 void BrowserWindow::OnWindowLeaveFullScreen() {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   if (web_contents()->IsFullscreen())
     web_contents()->ExitFullscreen(true);
 #endif
@@ -340,7 +296,6 @@ void BrowserWindow::UpdateWindowControlsOverlay(
 
 void BrowserWindow::CloseImmediately() {
   // Close all child windows before closing current window.
-  v8::Locker locker(isolate());
   v8::HandleScope handle_scope(isolate());
   for (v8::Local<v8::Value> value : child_windows_.Values(isolate())) {
     gin::Handle<BrowserWindow> child;
@@ -370,78 +325,66 @@ void BrowserWindow::Blur() {
 
 void BrowserWindow::SetBackgroundColor(const std::string& color_name) {
   BaseWindow::SetBackgroundColor(color_name);
-  SkColor color = ParseHexColor(color_name);
+  SkColor color = ParseCSSColor(color_name);
   web_contents()->SetPageBaseBackgroundColor(color);
   auto* rwhv = web_contents()->GetRenderWidgetHostView();
-  if (rwhv)
+  if (rwhv) {
     rwhv->SetBackgroundColor(color);
+    static_cast<content::RenderWidgetHostViewBase*>(rwhv)
+        ->SetContentBackgroundColor(color);
+  }
   // Also update the web preferences object otherwise the view will be reset on
   // the next load URL call
   if (api_web_contents_) {
     auto* web_preferences =
         WebContentsPreferences::From(api_web_contents_->web_contents());
     if (web_preferences) {
-      web_preferences->SetBackgroundColor(ParseHexColor(color_name));
+      web_preferences->SetBackgroundColor(ParseCSSColor(color_name));
     }
   }
 }
 
-void BrowserWindow::SetBrowserView(v8::Local<v8::Value> value) {
+void BrowserWindow::SetBrowserView(
+    absl::optional<gin::Handle<BrowserView>> browser_view) {
   BaseWindow::ResetBrowserViews();
-  BaseWindow::AddBrowserView(value);
-#if defined(OS_MAC)
+  if (browser_view)
+    BaseWindow::AddBrowserView(*browser_view);
+#if BUILDFLAG(IS_MAC)
   UpdateDraggableRegions(draggable_regions_);
 #endif
 }
 
-void BrowserWindow::AddBrowserView(v8::Local<v8::Value> value) {
-  BaseWindow::AddBrowserView(value);
-#if defined(OS_MAC)
+void BrowserWindow::AddBrowserView(gin::Handle<BrowserView> browser_view) {
+  BaseWindow::AddBrowserView(browser_view);
+#if BUILDFLAG(IS_MAC)
   UpdateDraggableRegions(draggable_regions_);
 #endif
 }
 
-void BrowserWindow::RemoveBrowserView(v8::Local<v8::Value> value) {
-  BaseWindow::RemoveBrowserView(value);
-#if defined(OS_MAC)
+void BrowserWindow::RemoveBrowserView(gin::Handle<BrowserView> browser_view) {
+  BaseWindow::RemoveBrowserView(browser_view);
+#if BUILDFLAG(IS_MAC)
   UpdateDraggableRegions(draggable_regions_);
 #endif
 }
 
-void BrowserWindow::SetTopBrowserView(v8::Local<v8::Value> value,
+void BrowserWindow::SetTopBrowserView(gin::Handle<BrowserView> browser_view,
                                       gin_helper::Arguments* args) {
-  BaseWindow::SetTopBrowserView(value, args);
-#if defined(OS_MAC)
+  BaseWindow::SetTopBrowserView(browser_view, args);
+#if BUILDFLAG(IS_MAC)
   UpdateDraggableRegions(draggable_regions_);
 #endif
 }
 
 void BrowserWindow::ResetBrowserViews() {
   BaseWindow::ResetBrowserViews();
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   UpdateDraggableRegions(draggable_regions_);
 #endif
 }
 
 void BrowserWindow::OnDevToolsResized() {
   UpdateDraggableRegions(draggable_regions_);
-}
-
-void BrowserWindow::SetVibrancy(v8::Isolate* isolate,
-                                v8::Local<v8::Value> value) {
-  std::string type = gin::V8ToString(isolate, value);
-
-  auto* render_view_host = web_contents()->GetRenderViewHost();
-  if (render_view_host) {
-    auto* impl = content::RenderWidgetHostImpl::FromID(
-        render_view_host->GetProcess()->GetID(),
-        render_view_host->GetRoutingID());
-    if (impl)
-      impl->owner_delegate()->SetBackgroundOpaque(
-          type.empty() ? !window_->transparent() : false);
-  }
-
-  BaseWindow::SetVibrancy(isolate, value);
 }
 
 void BrowserWindow::FocusOnWebView() {
@@ -463,6 +406,65 @@ v8::Local<v8::Value> BrowserWindow::GetWebContents(v8::Isolate* isolate) {
   return v8::Local<v8::Value>::New(isolate, web_contents_);
 }
 
+#if BUILDFLAG(IS_WIN)
+void BrowserWindow::SetTitleBarOverlay(const gin_helper::Dictionary& options,
+                                       gin_helper::Arguments* args) {
+  // Ensure WCO is already enabled on this window
+  if (!window_->titlebar_overlay_enabled()) {
+    args->ThrowError("Titlebar overlay is not enabled");
+    return;
+  }
+
+  auto* window = static_cast<NativeWindowViews*>(window_.get());
+  bool updated = false;
+
+  // Check and update the button color
+  std::string btn_color;
+  if (options.Get(options::kOverlayButtonColor, &btn_color)) {
+    // Parse the string as a CSS color
+    SkColor color;
+    if (!content::ParseCssColorString(btn_color, &color)) {
+      args->ThrowError("Could not parse color as CSS color");
+      return;
+    }
+
+    // Update the view
+    window->set_overlay_button_color(color);
+    updated = true;
+  }
+
+  // Check and update the symbol color
+  std::string symbol_color;
+  if (options.Get(options::kOverlaySymbolColor, &symbol_color)) {
+    // Parse the string as a CSS color
+    SkColor color;
+    if (!content::ParseCssColorString(symbol_color, &color)) {
+      args->ThrowError("Could not parse symbol color as CSS color");
+      return;
+    }
+
+    // Update the view
+    window->set_overlay_symbol_color(color);
+    updated = true;
+  }
+
+  // Check and update the height
+  int height = 0;
+  if (options.Get(options::kOverlayHeight, &height)) {
+    window->set_titlebar_overlay_height(height);
+    updated = true;
+  }
+
+  // If anything was updated, invalidate the layout and schedule a paint of the
+  // window's frame view
+  if (updated) {
+    auto* frame_view = static_cast<WinFrameView*>(
+        window->widget()->non_client_view()->frame_view());
+    frame_view->InvalidateCaptionButtons();
+  }
+}
+#endif
+
 void BrowserWindow::ScheduleUnresponsiveEvent(int ms) {
   if (!window_unresponsive_closure_.IsCancelled())
     return;
@@ -476,8 +478,7 @@ void BrowserWindow::ScheduleUnresponsiveEvent(int ms) {
 
 void BrowserWindow::NotifyWindowUnresponsive() {
   window_unresponsive_closure_.Cancel();
-  if (!window_->IsClosed() && window_->IsEnabled() &&
-      !IsUnresponsiveEventSuppressed()) {
+  if (!window_->IsClosed() && window_->IsEnabled()) {
     Emit("unresponsive");
   }
 }
@@ -521,6 +522,9 @@ void BrowserWindow::BuildPrototype(v8::Isolate* isolate,
       .SetMethod("focusOnWebView", &BrowserWindow::FocusOnWebView)
       .SetMethod("blurWebView", &BrowserWindow::BlurWebView)
       .SetMethod("isWebViewFocused", &BrowserWindow::IsWebViewFocused)
+#if BUILDFLAG(IS_WIN)
+      .SetMethod("setTitleBarOverlay", &BrowserWindow::SetTitleBarOverlay)
+#endif
       .SetProperty("webContents", &BrowserWindow::GetWebContents);
 }
 
@@ -534,9 +538,7 @@ v8::Local<v8::Value> BrowserWindow::From(v8::Isolate* isolate,
     return v8::Null(isolate);
 }
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 namespace {
 

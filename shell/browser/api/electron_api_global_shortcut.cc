@@ -9,7 +9,7 @@
 #include "base/containers/contains.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/common/extensions/command.h"
+#include "extensions/common/command.h"
 #include "gin/dictionary.h"
 #include "gin/object_template_builder.h"
 #include "shell/browser/api/electron_api_system_preferences.h"
@@ -18,7 +18,7 @@
 #include "shell/common/gin_converters/callback_converter.h"
 #include "shell/common/node_includes.h"
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 #include "base/mac/mac_util.h"
 #endif
 
@@ -27,7 +27,7 @@ using extensions::GlobalShortcutListener;
 
 namespace {
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 bool RegisteringMediaKeyForUntrustedClient(const ui::Accelerator& accelerator) {
   if (base::mac::IsAtLeastOS10_14()) {
     if (Command::IsMediaKey(accelerator)) {
@@ -51,9 +51,7 @@ bool MapHasMediaKeys(
 
 }  // namespace
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 gin::WrapperInfo GlobalShortcut::kWrapperInfo = {gin::kEmbedderNativeGin};
 
@@ -103,7 +101,7 @@ bool GlobalShortcut::Register(const ui::Accelerator& accelerator,
         .ThrowError("globalShortcut cannot be used before the app is ready");
     return false;
   }
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   if (Command::IsMediaKey(accelerator)) {
     if (RegisteringMediaKeyForUntrustedClient(accelerator))
       return false;
@@ -130,7 +128,7 @@ void GlobalShortcut::Unregister(const ui::Accelerator& accelerator) {
   if (accelerator_callback_map_.erase(accelerator) == 0)
     return;
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   if (Command::IsMediaKey(accelerator) &&
       !MapHasMediaKeys(accelerator_callback_map_)) {
     GlobalShortcutListener::SetShouldUseInternalMediaKeyHandling(true);
@@ -182,9 +180,7 @@ const char* GlobalShortcut::GetTypeName() {
   return "GlobalShortcut";
 }
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 namespace {
 

@@ -15,9 +15,7 @@
 #include "gin/wrappable.h"
 #include "shell/common/gin_helper/pinnable.h"
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 class DesktopCapturer : public gin::Wrappable<DesktopCapturer>,
                         public gin_helper::Pinnable<DesktopCapturer>,
@@ -60,6 +58,7 @@ class DesktopCapturer : public gin::Wrappable<DesktopCapturer>,
   void OnSourceNameChanged(int index) override {}
   void OnSourceThumbnailChanged(int index) override {}
   void OnSourcePreviewChanged(size_t index) override {}
+  void OnDelegatedSourceListSelection() override {}
 
  private:
   void UpdateSourcesList(DesktopMediaList* list);
@@ -70,15 +69,13 @@ class DesktopCapturer : public gin::Wrappable<DesktopCapturer>,
   bool capture_window_ = false;
   bool capture_screen_ = false;
   bool fetch_window_icons_ = false;
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   bool using_directx_capturer_ = false;
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
   base::WeakPtrFactory<DesktopCapturer> weak_ptr_factory_{this};
 };
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 #endif  // ELECTRON_SHELL_BROWSER_API_ELECTRON_API_DESKTOP_CAPTURER_H_

@@ -8,10 +8,10 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "content/public/renderer/render_frame.h"
-#include "content/public/renderer/render_view.h"
 #include "electron/buildflags/buildflags.h"
 #include "electron/shell/common/api/api.mojom.h"
 #include "ipc/ipc_message_macros.h"
@@ -22,7 +22,7 @@
 #include "shell/common/options_switches.h"
 #include "shell/common/world_ids.h"
 #include "shell/renderer/renderer_client_base.h"
-#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/web_preferences/web_preferences.h"
 #include "third_party/blink/public/platform/web_isolated_world_info.h"
 #include "third_party/blink/public/web/blink.h"
@@ -82,9 +82,9 @@ void ElectronRenderFrameObserver::DidInstallConditionalFeatures(
     v8::Handle<v8::Context> context,
     int world_id) {
   // When a child window is created with window.open, its WebPreferences will
-  // be copied from its parent, and Chromium will intialize JS context in it
+  // be copied from its parent, and Chromium will initialize JS context in it
   // immediately.
-  // Normally the WebPreferences is overriden in browser before navigation,
+  // Normally the WebPreferences is overridden in browser before navigation,
   // but this behavior bypasses the browser side navigation and the child
   // window will get wrong WebPreferences in the initialization.
   // This will end up initializing Node.js in the child window with wrong
@@ -92,7 +92,7 @@ void ElectronRenderFrameObserver::DidInstallConditionalFeatures(
   // while "nodeIntegration=no" is passed.
   // We work around this issue by delaying the child window's initialization of
   // Node.js if this is the initial empty document, and only do it when the
-  // acutal page has started to load.
+  // actual page has started to load.
   auto* web_frame =
       static_cast<blink::WebLocalFrameImpl*>(render_frame_->GetWebFrame());
   if (web_frame->Opener() && web_frame->IsOnInitialEmptyDocument()) {
@@ -149,10 +149,11 @@ void ElectronRenderFrameObserver::DraggableRegionsChanged() {
     regions.push_back(std::move(region));
   }
 
-  mojo::Remote<mojom::ElectronBrowser> browser_remote;
-  render_frame_->GetBrowserInterfaceBroker()->GetInterface(
-      browser_remote.BindNewPipeAndPassReceiver());
-  browser_remote->UpdateDraggableRegions(std::move(regions));
+  mojo::AssociatedRemote<mojom::ElectronWebContentsUtility>
+      web_contents_utility_remote;
+  render_frame_->GetRemoteAssociatedInterfaces()->GetInterface(
+      &web_contents_utility_remote);
+  web_contents_utility_remote->UpdateDraggableRegions(std::move(regions));
 }
 
 void ElectronRenderFrameObserver::WillReleaseScriptContext(
@@ -169,10 +170,11 @@ void ElectronRenderFrameObserver::OnDestruct() {
 void ElectronRenderFrameObserver::DidMeaningfulLayout(
     blink::WebMeaningfulLayout layout_type) {
   if (layout_type == blink::WebMeaningfulLayout::kVisuallyNonEmpty) {
-    mojo::Remote<mojom::ElectronBrowser> browser_remote;
-    render_frame_->GetBrowserInterfaceBroker()->GetInterface(
-        browser_remote.BindNewPipeAndPassReceiver());
-    browser_remote->OnFirstNonEmptyLayout();
+    mojo::AssociatedRemote<mojom::ElectronWebContentsUtility>
+        web_contents_utility_remote;
+    render_frame_->GetRemoteAssociatedInterfaces()->GetInterface(
+        &web_contents_utility_remote);
+    web_contents_utility_remote->OnFirstNonEmptyLayout();
   }
 }
 

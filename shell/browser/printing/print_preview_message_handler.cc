@@ -11,7 +11,6 @@
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/task/post_task.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/printing/printer_query.h"
@@ -22,8 +21,8 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_user_data.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
-#include "shell/common/gin_helper/locker.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 
 #include "shell/common/node_includes.h"
@@ -42,8 +41,8 @@ void StopWorker(int document_cookie) {
   std::unique_ptr<printing::PrinterQuery> printer_query =
       queue->PopPrinterQuery(document_cookie);
   if (printer_query.get()) {
-    base::PostTask(FROM_HERE, {BrowserThread::IO},
-                   base::BindOnce(&printing::PrinterQuery::StopWorker,
+    content::GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&printing::PrinterQuery::StopWorker,
                                   std::move(printer_query)));
   }
 }
@@ -52,7 +51,8 @@ void StopWorker(int document_cookie) {
 
 PrintPreviewMessageHandler::PrintPreviewMessageHandler(
     content::WebContents* web_contents)
-    : web_contents_(web_contents) {
+    : content::WebContentsUserData<PrintPreviewMessageHandler>(*web_contents),
+      web_contents_(web_contents) {
   DCHECK(web_contents);
 }
 
@@ -117,7 +117,7 @@ void PrintPreviewMessageHandler::DidPrepareDocumentForPreview(
     auto* focused_frame = web_contents_->GetFocusedFrame();
     auto* rfh = focused_frame && focused_frame->HasSelection()
                     ? focused_frame
-                    : web_contents_->GetMainFrame();
+                    : web_contents_->GetPrimaryMainFrame();
 
     client->DoPrepareForDocumentToPdf(
         document_cookie, rfh,
@@ -179,7 +179,7 @@ void PrintPreviewMessageHandler::DidPreviewPage(
     auto* focused_frame = web_contents_->GetFocusedFrame();
     auto* rfh = focused_frame && focused_frame->HasSelection()
                     ? focused_frame
-                    : web_contents_->GetMainFrame();
+                    : web_contents_->GetPrimaryMainFrame();
 
     // Use utility process to convert skia metafile to pdf.
     client->DoCompositePageToPdf(
@@ -217,7 +217,7 @@ void PrintPreviewMessageHandler::PrintToPDF(
   auto* focused_frame = web_contents_->GetFocusedFrame();
   auto* rfh = focused_frame && focused_frame->HasSelection()
                   ? focused_frame
-                  : web_contents_->GetMainFrame();
+                  : web_contents_->GetPrimaryMainFrame();
 
   if (!print_render_frame_.is_bound()) {
     rfh->GetRemoteAssociatedInterfaces()->GetInterface(&print_render_frame_);
@@ -226,7 +226,7 @@ void PrintPreviewMessageHandler::PrintToPDF(
     print_render_frame_->SetPrintPreviewUI(
         receiver_.BindNewEndpointAndPassRemote());
   }
-  print_render_frame_->PrintPreview(options.Clone());
+  print_render_frame_->PrintPreview(options.GetDict().Clone());
 }
 
 gin_helper::Promise<v8::Local<v8::Value>>
@@ -248,7 +248,6 @@ void PrintPreviewMessageHandler::ResolvePromise(
   gin_helper::Promise<v8::Local<v8::Value>> promise = GetPromise(request_id);
 
   v8::Isolate* isolate = promise.isolate();
-  gin_helper::Locker locker(isolate);
   v8::HandleScope handle_scope(isolate);
   v8::Context::Scope context_scope(
       v8::Local<v8::Context>::New(isolate, promise.GetContext()));

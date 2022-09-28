@@ -42,15 +42,13 @@
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/image/image_util.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/scoped_gdi_object.h"
 #include "shell/common/asar/archive.h"
 #include "ui/gfx/icon_util.h"
 #endif
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 namespace {
 
@@ -78,14 +76,14 @@ base::FilePath NormalizePath(const base::FilePath& path) {
   }
 }
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 bool IsTemplateFilename(const base::FilePath& path) {
   return (base::MatchPattern(path.value(), "*Template.*") ||
           base::MatchPattern(path.value(), "*Template@*x.*"));
 }
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 base::win::ScopedHICON ReadICOFromPath(int size, const base::FilePath& path) {
   // If file is in asar archive, we extract it to a temp file so LoadImage can
   // load it.
@@ -109,10 +107,10 @@ base::win::ScopedHICON ReadICOFromPath(int size, const base::FilePath& path) {
 
 NativeImage::NativeImage(v8::Isolate* isolate, const gfx::Image& image)
     : image_(image), isolate_(isolate) {
-  AdjustAmountOfExternalAllocatedMemory(true);
+  UpdateExternalAllocatedMemoryUsage();
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 NativeImage::NativeImage(v8::Isolate* isolate, const base::FilePath& hicon_path)
     : hicon_path_(hicon_path), isolate_(isolate) {
   // Use the 256x256 icon as fallback icon.
@@ -120,22 +118,27 @@ NativeImage::NativeImage(v8::Isolate* isolate, const base::FilePath& hicon_path)
   electron::util::ReadImageSkiaFromICO(&image_skia, GetHICON(256));
   image_ = gfx::Image(image_skia);
 
-  AdjustAmountOfExternalAllocatedMemory(true);
+  UpdateExternalAllocatedMemoryUsage();
 }
 #endif
 
 NativeImage::~NativeImage() {
-  AdjustAmountOfExternalAllocatedMemory(false);
+  isolate_->AdjustAmountOfExternalAllocatedMemory(-memory_usage_);
 }
 
-void NativeImage::AdjustAmountOfExternalAllocatedMemory(bool add) {
+void NativeImage::UpdateExternalAllocatedMemoryUsage() {
+  int32_t new_memory_usage = 0;
+
   if (image_.HasRepresentation(gfx::Image::kImageRepSkia)) {
     auto* const image_skia = image_.ToImageSkia();
     if (!image_skia->isNull()) {
-      int64_t size = image_skia->bitmap()->computeByteSize();
-      isolate_->AdjustAmountOfExternalAllocatedMemory(add ? size : -size);
+      new_memory_usage = image_skia->bitmap()->computeByteSize();
     }
   }
+
+  isolate_->AdjustAmountOfExternalAllocatedMemory(new_memory_usage -
+                                                  memory_usage_);
+  memory_usage_ = new_memory_usage;
 }
 
 // static
@@ -149,7 +152,7 @@ bool NativeImage::TryConvertNativeImage(v8::Isolate* isolate,
   if (gin::ConvertFromV8(isolate, image, &icon_path)) {
     *native_image = NativeImage::CreateFromPath(isolate, icon_path).get();
     if ((*native_image)->image().IsEmpty()) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       const auto img_path = base::WideToUTF8(icon_path.value());
 #else
       const auto img_path = icon_path.value();
@@ -178,7 +181,7 @@ bool NativeImage::TryConvertNativeImage(v8::Isolate* isolate,
   return true;
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 HICON NativeImage::GetHICON(int size) {
   auto iter = hicons_.find(size);
   if (iter != hicons_.end())
@@ -266,10 +269,6 @@ std::string NativeImage::ToDataURL(gin::Arguments* args) {
       image_.AsImageSkia().GetRepresentation(scale_factor).GetBitmap());
 }
 
-void SkUnref(char* data, void* hint) {
-  reinterpret_cast<SkRefCnt*>(hint)->unref();
-}
-
 v8::Local<v8::Value> NativeImage::GetBitmap(gin::Arguments* args) {
   float scale_factor = GetScaleFactorFromOptions(args);
 
@@ -278,16 +277,15 @@ v8::Local<v8::Value> NativeImage::GetBitmap(gin::Arguments* args) {
   SkPixelRef* ref = bitmap.pixelRef();
   if (!ref)
     return node::Buffer::New(args->isolate(), 0).ToLocalChecked();
-  ref->ref();
-  return node::Buffer::New(args->isolate(),
-                           reinterpret_cast<char*>(ref->pixels()),
-                           bitmap.computeByteSize(), &SkUnref, ref)
+  return node::Buffer::Copy(args->isolate(),
+                            reinterpret_cast<char*>(ref->pixels()),
+                            bitmap.computeByteSize())
       .ToLocalChecked();
 }
 
 v8::Local<v8::Value> NativeImage::GetNativeHandle(
     gin_helper::ErrorThrower thrower) {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   if (IsEmpty())
     return node::Buffer::New(thrower.isolate(), 0).ToLocalChecked();
 
@@ -331,24 +329,24 @@ float NativeImage::GetAspectRatio(const absl::optional<float> scale_factor) {
 }
 
 gin::Handle<NativeImage> NativeImage::Resize(gin::Arguments* args,
-                                             base::DictionaryValue options) {
+                                             base::Value::Dict options) {
   float scale_factor = GetScaleFactorFromOptions(args);
 
   gfx::Size size = GetSize(scale_factor);
-  int width = size.width();
-  int height = size.height();
-  bool width_set = options.GetInteger("width", &width);
-  bool height_set = options.GetInteger("height", &height);
+  absl::optional<int> new_width = options.FindInt("width");
+  absl::optional<int> new_height = options.FindInt("height");
+  int width = new_width.value_or(size.width());
+  int height = new_height.value_or(size.height());
   size.SetSize(width, height);
 
   if (width <= 0 && height <= 0) {
     return CreateEmpty(args->isolate());
-  } else if (width_set && !height_set) {
+  } else if (new_width && !new_height) {
     // Scale height to preserve original aspect ratio
     size.set_height(width);
     size =
         gfx::ScaleToRoundedSize(size, 1.f, 1.f / GetAspectRatio(scale_factor));
-  } else if (height_set && !width_set) {
+  } else if (new_height && !new_width) {
     // Scale width to preserve original aspect ratio
     size.set_width(height);
     size = gfx::ScaleToRoundedSize(size, GetAspectRatio(scale_factor), 1.f);
@@ -356,11 +354,10 @@ gin::Handle<NativeImage> NativeImage::Resize(gin::Arguments* args,
 
   skia::ImageOperations::ResizeMethod method =
       skia::ImageOperations::ResizeMethod::RESIZE_BEST;
-  std::string quality;
-  options.GetString("quality", &quality);
-  if (quality == "good")
+  std::string* quality = options.FindString("quality");
+  if (quality && *quality == "good")
     method = skia::ImageOperations::ResizeMethod::RESIZE_GOOD;
-  else if (quality == "better")
+  else if (quality && *quality == "better")
     method = skia::ImageOperations::ResizeMethod::RESIZE_BETTER;
 
   gfx::ImageSkia resized = gfx::ImageSkiaOperations::CreateResizedImage(
@@ -416,7 +413,7 @@ void NativeImage::AddRepresentation(const gin_helper::Dictionary& options) {
   }
 }
 
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
 void NativeImage::SetTemplateImage(bool setAsTemplate) {}
 
 bool NativeImage::IsTemplateImage() {
@@ -460,7 +457,7 @@ gin::Handle<NativeImage> NativeImage::CreateFromPath(
     v8::Isolate* isolate,
     const base::FilePath& path) {
   base::FilePath image_path = NormalizePath(path);
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   if (image_path.MatchesExtension(FILE_PATH_LITERAL(".ico"))) {
     return gin::CreateHandle(isolate, new NativeImage(isolate, image_path));
   }
@@ -469,7 +466,7 @@ gin::Handle<NativeImage> NativeImage::CreateFromPath(
   electron::util::PopulateImageSkiaRepsFromPath(&image_skia, image_path);
   gfx::Image image(image_skia);
   gin::Handle<NativeImage> handle = Create(isolate, image);
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   if (IsTemplateFilename(image_path))
     handle->SetTemplateImage(true);
 #endif
@@ -566,7 +563,7 @@ gin::Handle<NativeImage> NativeImage::CreateFromDataURL(v8::Isolate* isolate,
   return CreateEmpty(isolate);
 }
 
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
 gin::Handle<NativeImage> NativeImage::CreateFromNamedImage(gin::Arguments* args,
                                                            std::string name) {
   return CreateEmpty(args->isolate());
@@ -613,9 +610,7 @@ const char* NativeImage::GetTypeName() {
 // static
 gin::WrapperInfo NativeImage::kWrapperInfo = {gin::kEmbedderNativeGin};
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 namespace {
 
@@ -637,7 +632,7 @@ void Initialize(v8::Local<v8::Object> exports,
   native_image.SetMethod("createFromDataURL", &NativeImage::CreateFromDataURL);
   native_image.SetMethod("createFromNamedImage",
                          &NativeImage::CreateFromNamedImage);
-#if !defined(OS_LINUX)
+#if !BUILDFLAG(IS_LINUX)
   native_image.SetMethod("createThumbnailFromPath",
                          &NativeImage::CreateThumbnailFromPath);
 #endif

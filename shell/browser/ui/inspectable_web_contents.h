@@ -70,10 +70,13 @@ class InspectableWebContents
   bool IsDevToolsViewShowing();
   void AttachTo(scoped_refptr<content::DevToolsAgentHost>);
   void Detach();
-  void CallClientFunction(const std::string& function_name,
-                          const base::Value* arg1,
-                          const base::Value* arg2,
-                          const base::Value* arg3);
+  void CallClientFunction(
+      const std::string& object_name,
+      const std::string& method_name,
+      const base::Value arg1 = {},
+      const base::Value arg2 = {},
+      const base::Value arg3 = {},
+      base::OnceCallback<void(base::Value)> cb = base::NullCallback());
   void InspectElement(int x, int y);
 
   // Return the last position and size of devtools window.
@@ -85,7 +88,7 @@ class InspectableWebContents
   void UpdateDevToolsZoomLevel(double level);
 
  private:
-  // DevToolsEmbedderMessageDispacher::Delegate
+  // DevToolsEmbedderMessageDispatcher::Delegate
   void ActivateWindow() override;
   void CloseWindow() override;
   void LoadCompleted() override;
@@ -140,8 +143,10 @@ class InspectableWebContents
                        const std::string& browser_id,
                        const std::string& url) override;
   void RegisterPreference(const std::string& name,
-                          const RegisterOptions& options) override;
+                          const RegisterOptions& options) override {}
   void GetPreferences(DispatchCallback callback) override;
+  void GetPreference(DispatchCallback callback,
+                     const std::string& name) override;
   void SetPreference(const std::string& name,
                      const std::string& value) override;
   void RemovePreference(const std::string& name) override;
@@ -165,7 +170,7 @@ class InspectableWebContents
                      const std::string& trigger) override {}
 
   // content::DevToolsFrontendHostDelegate:
-  void HandleMessageFromDevToolsFrontend(base::Value message);
+  void HandleMessageFromDevToolsFrontend(base::Value::Dict message);
 
   // content::DevToolsAgentHostClient:
   void DispatchProtocolMessage(content::DevToolsAgentHost* agent_host,
@@ -195,9 +200,6 @@ class InspectableWebContents
                           const base::FilePath& path) override;
 
   void SendMessageAck(int request_id, const base::Value* arg1);
-
-  const char* GetDictionaryNameForSettingsName(const std::string& name) const;
-  const char* GetDictionaryNameForSyncedPrefs() const;
 
 #if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
   void AddDevToolsExtensionsToClient();

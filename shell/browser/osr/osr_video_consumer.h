@@ -11,6 +11,7 @@
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "components/viz/host/client_frame_sink_video_capturer.h"
+#include "media/capture/mojom/video_capture_buffer.mojom-forward.h"
 #include "media/capture/mojom/video_capture_types.mojom.h"
 
 namespace electron {
@@ -32,16 +33,18 @@ class OffScreenVideoConsumer : public viz::mojom::FrameSinkVideoConsumer {
 
   void SetActive(bool active);
   void SetFrameRate(int frame_rate);
-  void SizeChanged();
+  void SizeChanged(const gfx::Size& size_in_pixels);
 
  private:
   // viz::mojom::FrameSinkVideoConsumer implementation.
   void OnFrameCaptured(
-      base::ReadOnlySharedMemoryRegion data,
+      ::media::mojom::VideoBufferHandlePtr data,
       ::media::mojom::VideoFrameInfoPtr info,
       const gfx::Rect& content_rect,
       mojo::PendingRemote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
           callbacks) override;
+  void OnNewCropVersion(uint32_t crop_version) override;
+  void OnFrameWithEmptyRegionCapture() override;
   void OnStopped() override;
   void OnLog(const std::string& message) override;
 

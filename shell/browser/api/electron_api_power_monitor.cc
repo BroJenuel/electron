@@ -35,14 +35,12 @@ struct Converter<ui::IdleState> {
 
 }  // namespace gin
 
-namespace electron {
-
-namespace api {
+namespace electron::api {
 
 gin::WrapperInfo PowerMonitor::kWrapperInfo = {gin::kEmbedderNativeGin};
 
 PowerMonitor::PowerMonitor(v8::Isolate* isolate) {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   Browser::Get()->SetShutdownHandler(base::BindRepeating(
       &PowerMonitor::ShouldShutdown, base::Unretained(this)));
 #endif
@@ -50,7 +48,7 @@ PowerMonitor::PowerMonitor(v8::Isolate* isolate) {
   base::PowerMonitor::AddPowerStateObserver(this);
   base::PowerMonitor::AddPowerSuspendObserver(this);
 
-#if defined(OS_MAC) || defined(OS_WIN)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
   InitPlatformSpecificMonitors();
 #endif
 }
@@ -79,7 +77,7 @@ void PowerMonitor::OnResume() {
   Emit("resume");
 }
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
 void PowerMonitor::SetListeningForShutdown(bool is_listening) {
   if (is_listening) {
     // unretained is OK because we own power_observer_linux_
@@ -105,7 +103,7 @@ gin::ObjectTemplateBuilder PowerMonitor::GetObjectTemplateBuilder(
   auto builder =
       gin_helper::EventEmitterMixin<PowerMonitor>::GetObjectTemplateBuilder(
           isolate);
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX)
   builder.SetMethod("setListeningForShutdown",
                     &PowerMonitor::SetListeningForShutdown);
 #endif
@@ -116,9 +114,7 @@ const char* PowerMonitor::GetTypeName() {
   return "PowerMonitor";
 }
 
-}  // namespace api
-
-}  // namespace electron
+}  // namespace electron::api
 
 namespace {
 
